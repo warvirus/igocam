@@ -35,6 +35,9 @@ videos/
 ptz_presets.json
 *.yaml.tmp
 
+# ── 테스트 산출물 ──
+var/
+
 # ── 프로파일 / 진단 ──
 *.prof
 *.pprof
