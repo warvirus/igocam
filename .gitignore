@@ -1,0 +1,98 @@
+# ─────────────────────────────────────────────────────────
+# igocam .gitignore
+# ─────────────────────────────────────────────────────────
+
+# ── 빌드 산출물 (build) ──
+bin/
+build/
+dist/
+out/
+
+# 실행 바이너리
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# ── 로그 (logs) ──
+logs/
+*.log
+log.txt
+*.trace
+*.json.log
+
+# ── Go ──
+go.work
+go.work.sum
+vendor/
+
+# ── 런타임 / 실행 파일 ──
+data/
+recordings/
+videos/
+ptz_presets.json
+*.yaml.tmp
+
+# ── 프로파일 / 진단 ──
+*.prof
+*.pprof
+mem_probe_main.go
+*_diag_main.go
+
+# ── AI 지침서 (instruction files) ──
+AGENTS.md
+CLAUDE.md
+.agents/
+.claude/
+.cursor/
+.opencode/
+.cursorrules
+.github/copilot-instructions.md
+
+# ── 부산물 / 진행 기록 md ──
+MEMORY.md
+checklist.md
+context-notes.md
+CHANGELOG.md
+CONTRIBUTING.md
+docs/
+
+# ── IDE / 에디터 ──
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS (Windows / macOS / Linux) ──
+
+## Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.tmp
+
+## macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100/
+.fseventsd/
+.Spotlight-V100/
+.TemporaryItems/
+.Trashes/
+.SymSrv/
+
+## Linux
+core
+core.*
+*.pid
+*.lock
+nohup.out

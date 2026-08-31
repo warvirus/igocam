@@ -1,0 +1,31 @@
+# 빌드 산출물
+bin/
+build/
+dist/
+out/
+
+# 런타임
+data/
+recordings/
+videos/
+logs/
+
+# Go 캐시
+vendor/
+
+# Git
+.git/
+.gitignore
+
+# 진단/프로파일
+*.prof
+*.pprof
+*_diag_main.go
+
+# 로컬 설정 (컨테이너는 자체 설정 사용)
+README.md
+MEMORY.md
+checklist.md
+context-notes.md
+AGENTS.md
+CLAUDE.md
