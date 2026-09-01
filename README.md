@@ -81,7 +81,7 @@ go install github.com/AlexxIT/go2rtc@v1.9.14
 
 또는
 
-./bin/igocam --config bin/camera_config.json --port 8080 --admin-user admin --admin-pass secret
+./bin/igocam --config bin/camera_config.json --port 8080 --admin-user admin --admin-pass pass
 # 접속: http://192.168.0.217:8080/
 ```
 

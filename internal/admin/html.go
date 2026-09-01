@@ -311,6 +311,9 @@ function openAddModal(){
   ['f_name','f_source','f_main_w','f_main_h','f_main_fps','f_main_br','f_sub_w','f_sub_h','f_sub_fps','f_sub_br'].forEach(function(id){ document.getElementById(id).value=''; });
   document.getElementById('f_hw_accel').value='videotoolbox';
   document.getElementById('f_bypass').value='false';
+  // 해상도 기본값
+  document.getElementById('f_main_w').value=1280; document.getElementById('f_main_h').value=720;
+  document.getElementById('f_sub_w').value=320; document.getElementById('f_sub_h').value=180;
   document.getElementById('f_main_fps').value=30; document.getElementById('f_main_br').value='1M';
   document.getElementById('f_sub_fps').value=30; document.getElementById('f_sub_br').value='500K';
   // 포트 자동 제안: 기존 카메라 최대 포트 +10

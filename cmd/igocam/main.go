@@ -28,8 +28,8 @@ func main() {
 	flag.StringVar(&configPath, "config", envOr("IGOCAM_CONFIG", config.DefaultConfigPath), "path to camera config JSON file")
 	flag.StringVar(&logLevel, "log-level", envOr("IGOCAM_LOG_LEVEL", "INFO"), "log level: DEBUG/INFO/WARNING/ERROR")
 	flag.IntVar(&adminPort, "port", envIntOr("IGOCAM_PORT", 8080), "admin server port")
-	flag.StringVar(&adminUser, "admin-user", envOr("IGOCAM_ADMIN_USER", "useradmin"), "admin basic auth username (optional)")
-	flag.StringVar(&adminPass, "admin-pass", envOr("IGOCAM_ADMIN_PASS", "userpass"), "admin basic auth password (optional)")
+	flag.StringVar(&adminUser, "admin-user", envOr("IGOCAM_ADMIN_USER", "admin"), "admin basic auth username (optional)")
+	flag.StringVar(&adminPass, "admin-pass", envOr("IGOCAM_ADMIN_PASS", "pass"), "admin basic auth password (optional)")
 	flag.Parse()
 
 	configs, err := config.LoadAll(configPath)
