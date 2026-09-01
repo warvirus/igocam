@@ -39,6 +39,8 @@ func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleRoot)
+	mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
 	mux.HandleFunc("/api/cameras", s.handleCameras)
 	mux.HandleFunc("/api/cameras/", s.handleCameraByID)
 	mux.HandleFunc("/api/reload", s.handleReload)
@@ -71,24 +73,72 @@ func (s *Server) Stop() error {
 }
 
 // authMiddleware 선택적 Basic Auth 미들웨어.
+// '/'와 '/api/auth/login'은 인증 없이 접근 가능 (로그인 화면 제공),
+// 그 외 '/api/*'에만 인증 적용.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.adminUser != "" && s.adminPass != "" {
+		isAPI := strings.HasPrefix(r.URL.Path, "/api/")
+		isAuthEndpoint := r.URL.Path == "/api/auth/login"
+		if s.adminUser != "" && isAPI && !isAuthEndpoint {
 			auth := r.Header.Get("Authorization")
 			if !strings.HasPrefix(auth, "Basic ") {
-				w.Header().Set("WWW-Authenticate", `Basic realm="igocam admin"`)
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				jsonResp(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 				return
 			}
 			decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(auth[6:]))
 			if err != nil || string(decoded) != s.adminUser+":"+s.adminPass {
-				w.Header().Set("WWW-Authenticate", `Basic realm="igocam admin"`)
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				jsonResp(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 				return
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// handleAuthLogin POST /api/auth/login — Basic Auth 자격 증명 검증.
+// body: {"username": "...", "password": "..."} 또는 Authorization header.
+func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonResp(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+	// admin 인증이 비활성화면 항상 성공.
+	if s.adminUser == "" {
+		jsonResp(w, http.StatusOK, map[string]string{"success": "logged_in"})
+		return
+	}
+	// body에서 자격 증명 시도.
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.Username != "" {
+		if body.Username == s.adminUser && body.Password == s.adminPass {
+			jsonResp(w, http.StatusOK, map[string]string{"success": "logged_in"})
+			return
+		}
+		jsonResp(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+		return
+	}
+	// Authorization header로 자격 증명 시도.
+	auth := r.Header.Get("Authorization")
+	if strings.HasPrefix(auth, "Basic ") {
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(auth[6:]))
+		if err == nil && string(decoded) == s.adminUser+":"+s.adminPass {
+			jsonResp(w, http.StatusOK, map[string]string{"success": "logged_in"})
+			return
+		}
+	}
+	jsonResp(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+}
+
+// handleAuthLogout POST /api/auth/logout — 클라이언트 측 로그아웃 (세션 없음, 확인용).
+func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonResp(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+	jsonResp(w, http.StatusOK, map[string]string{"success": "logged_out"})
 }
 
 // json 응답 헬퍼.
