@@ -284,6 +284,8 @@ func (m *Manager) startCamera(cfg *config.CameraConfig) (*camera.Camera, error) 
 		goStream.Stop()
 		return nil, fmt.Errorf("camera start failed")
 	}
+	m.wg.Add(1)
+	go m.captureLoop(cam)
 	return cam, nil
 }
 
@@ -303,8 +305,6 @@ func (m *Manager) AddCamera(cfg *config.CameraConfig) (*camera.Camera, error) {
 	if err := config.SaveAll(cfg.ConfigPath, m.configs); err != nil {
 		fmt.Printf("[WARN] Camera '%s': config save failed: %v\n", cfg.Name, err)
 	}
-	m.wg.Add(1)
-	go m.captureLoop(cam)
 	fmt.Printf("  [OK] Camera '%s' added on :%d\n", cfg.Name, cfg.OnvifPort)
 	return cam, nil
 }
@@ -437,9 +437,12 @@ func (m *Manager) StartAll() {
 		if m.CameraByID(cfg.ID) != nil {
 			continue
 		}
-		if _, err := m.AddCamera(cfg); err != nil {
+		cam, err := m.startCamera(cfg)
+		if err != nil {
 			fmt.Printf("[ERR] StartAll: camera '%s': %v\n", cfg.Name, err)
+			continue
 		}
+		m.cameras = append(m.cameras, cam)
 	}
 }
 
