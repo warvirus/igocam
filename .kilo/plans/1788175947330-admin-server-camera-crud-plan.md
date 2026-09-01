@@ -1,5 +1,36 @@
 # 관리 서버 + 카메라 CRUD + 서비스 제어 기획안 (v2)
 
+## ⚠️ 추가 발견: 카메라별 WebUI 저장 시 config 배열 파괴 (2026-09-01)
+
+**증상**: 관리 화면(8080)에서 카메라 클릭 → 카메라별 WebUI(onvif_port) 열림 → 설정 저장 → `camera_config.json`이 **배열에서 단일 객체 1개로** 바뀜.
+
+**원인**:
+- `camera_config.json`은 multi 카메라 모드에서 **JSON 배열** 구조.
+- 카메라별 WebUI의 저장 경로: `internal/httpserver/server.go:290` → `s.config.Save("")`
+- `config.CameraConfig.Save()` (config.go:488)는 **현재 카메라 1개를 단일 객체로 직렬화**해 `ConfigPath`(= 공유 배열 파일)에 **전체를 덮어씀** → 배열 파괴.
+
+**해결책 (사용자 제안 "포트 매칭"보다 더 나은 방법: ID 기반 매칭)**:
+`Save()`를 **멀티 카메라 인지형**으로 개선:
+1. 대상 파일이 **JSON 배열**이면:
+   - 배열 내에서 `id` 필드로 해당 카메라 항목을 찾음 (없으면 `onvif_port`로 폴백 매칭)
+   - 찾으면 → 해당 항목만 교체 (다른 카메라 보존)
+   - 없으면 → 배열 끝에 **추가**
+   - 전체 배열을 atomic write로 저장
+2. 대상 파일이 **단일 객체**(레거시 단일 카메라 모드) 또는 **없으면** → 기존처럼 단일 객체 저장
+
+**변경 파일**:
+- `internal/config/config.go`: `Save()` 로직 개선 + `saveIntoArray`/`saveSingle` 헬퍼 분리. `SaveAll`은 유지.
+- httpserver/server.go는 변경 불필요 (`s.config.Save("")` 그대로, Save가 배열 인지).
+
+**검증 계획**:
+- 배열 파일(카메라 8대)에서 cam1 WebUI 설정 변경 저장 → 배열 8개 유지, cam1 항목만 변경 확인
+- cam2 WebUI 저장 → cam2만 변경, 나머지 보존
+- 단일 객체 파일(레거시) 저장 → 단일 객체 유지
+- 새 카메라(배열에 없는 onvif_port) 저장 → 배열에 추가
+- go vet + 전체 테스트 green
+
+---
+
 ## 1. 아키텍처 개요
 
 ```

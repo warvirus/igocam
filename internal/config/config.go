@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // DefaultConfigPath 기본 설정 파일 경로.
@@ -483,8 +484,13 @@ func toInt(value any) (int, error) {
 	return 0, fmt.Errorf("invalid int: %v", value)
 }
 
+// saveMu 멀티 카메라 배열 파일에 대한 동시 쓰기 직렬화 (카메라별 WebUI 동시 저장 방지).
+var saveMu sync.Mutex
+
 // Save 설정을 JSON 파일로 원자적으로 저장.
-// 임시 파일에 쓴 뒤 os.Rename으로 교체해 크래시 중단에도 설정이 손상되지 않는다.
+// 멀티 카메라 모드(대상 파일이 배열)에서는 배열에서 이 카메라의 id(없으면
+// onvif_port) 항목을 찾아 교체하고, 없으면 배열에 추가한다. 단일 객체
+// 파일(레거시)이거나 파일이 없으면 단일 객체로 저장한다.
 func (c *CameraConfig) Save(filePath string) error {
 	if filePath == "" {
 		filePath = c.ConfigPath
@@ -492,6 +498,24 @@ func (c *CameraConfig) Save(filePath string) error {
 	if filePath == "" {
 		filePath = DefaultConfigPath
 	}
+
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
+	// 기존 파일이 JSON 배열이면 멀티 카메라 모드로 병합 저장.
+	if data, err := os.ReadFile(filePath); err == nil {
+		var existing []json.RawMessage
+		if json.Unmarshal(data, &existing) == nil && len(existing) > 0 {
+			return c.saveIntoArray(filePath, existing)
+		}
+	}
+
+	// 단일 객체 저장 (레거시/신규).
+	return c.saveSingle(filePath)
+}
+
+// saveSingle 단일 카메라 구조체로 저장.
+func (c *CameraConfig) saveSingle(filePath string) error {
 	type exportConfig CameraConfig
 	cfg := exportConfig(*c)
 	cfg.LocalIP = "" // local_ip는 자동 감지이므로 저장하지 않는다.
@@ -500,6 +524,61 @@ func (c *CameraConfig) Save(filePath string) error {
 	if err != nil {
 		return err
 	}
+	return atomicWrite(filePath, data)
+}
+
+// saveIntoArray 기존 배열에서 이 카메라 항목을 교체/추가 후 전체 배열을 저장한다.
+func (c *CameraConfig) saveIntoArray(filePath string, existing []json.RawMessage) error {
+	c.EnsureID()
+
+	type exportConfig CameraConfig
+	cfg := exportConfig(*c)
+	cfg.LocalIP = ""
+	selfData, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+
+	// id로 매칭 → 없으면 onvif_port로 폴백 매칭.
+	idx := -1
+	for i, raw := range existing {
+		var m map[string]any
+		if json.Unmarshal(raw, &m) != nil {
+			continue
+		}
+		if id, _ := m["id"].(string); id != "" && id == c.ID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		for i, raw := range existing {
+			var m map[string]any
+			if json.Unmarshal(raw, &m) != nil {
+				continue
+			}
+			if p, _ := m["onvif_port"].(float64); int(p) == c.OnvifPort {
+				idx = i
+				break
+			}
+		}
+	}
+
+	if idx >= 0 {
+		existing[idx] = selfData
+	} else {
+		existing = append(existing, selfData)
+	}
+
+	out, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWrite(filePath, out)
+}
+
+// atomicWrite 데이터를 임시 파일 → Rename 방식으로 원자적으로 저장한다.
+func atomicWrite(filePath string, data []byte) error {
 	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -550,9 +629,13 @@ func SaveAll(filePath string, configs []*CameraConfig) error {
 	if filePath == "" {
 		filePath = DefaultConfigPath
 	}
+	saveMu.Lock()
+	defer saveMu.Unlock()
+
 	type exportConfig CameraConfig
 	exported := make([]exportConfig, len(configs))
 	for i, cfg := range configs {
+		cfg.EnsureID()
 		exported[i] = exportConfig(*cfg)
 		exported[i].LocalIP = ""
 	}
@@ -560,28 +643,7 @@ func SaveAll(filePath string, configs []*CameraConfig) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".camera_config_*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, filePath)
+	return atomicWrite(filePath, data)
 }
 
 // Load 설정 파일에서 로드. 없으면 기본값 반환.
