@@ -196,6 +196,10 @@ func (s *Server) listCameras(w http.ResponseWriter, _ *http.Request) {
 			status = "stopped"
 		}
 		cfg := cam.Config
+		ip := cfg.LocalIP
+		if ip == "" {
+			ip = config.GetLocalIP()
+		}
 		list = append(list, camInfo{
 			ID:            cfg.ID,
 			Name:          cfg.Name,
@@ -205,7 +209,7 @@ func (s *Server) listCameras(w http.ResponseWriter, _ *http.Request) {
 			Status:        status,
 			StreamingMode: cam.StreamingMode(),
 			SnapURL:       fmt.Sprintf("/api/cameras/%s/snapshot", cfg.ID),
-			WebUIURL:      fmt.Sprintf("http://%s:%d/", cfg.LocalIP, cfg.OnvifPort),
+			WebUIURL:      fmt.Sprintf("http://%s:%d/", ip, cfg.OnvifPort),
 		})
 	}
 	jsonResp(w, http.StatusOK, list)
