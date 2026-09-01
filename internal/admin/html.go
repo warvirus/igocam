@@ -14,6 +14,7 @@ const adminHTML = `<!DOCTYPE html>
   .snap { width: 100%; height: 150px; object-fit: cover; background: #1e293b; }
   .badge { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium; }
   .toast { transition: opacity .3s; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>
 </head>
 <body class="text-slate-200">
@@ -29,8 +30,8 @@ const adminHTML = `<!DOCTYPE html>
     </div>
     <div class="flex flex-wrap gap-2">
       <button onclick="reloadConfig()" class="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg text-sm font-medium">🔄 Reload</button>
-      <button onclick="startAll()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium">▶ 전체 시작</button>
-      <button onclick="stopAll()" class="bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg text-sm font-medium">■ 전체 정지</button>
+      <button id="btnStartAll" onclick="startAll()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium">▶ 전체 시작</button>
+      <button id="btnStopAll" onclick="stopAll()" class="bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg text-sm font-medium">■ 전체 정지</button>
       <button onclick="pauseStreams()" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-medium">⏸ 멈춤</button>
       <button onclick="resumeStreams()" class="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 rounded-lg text-sm font-medium">▶ 재개</button>
       <button onclick="openAddModal()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium">+ 카메라 추가</button>
@@ -161,6 +162,13 @@ function render() {
       '</div>' +
     '</div>'
   )).join('');
+  // 서비스 상태에 따라 전체 시작/정지 버튼 활성화 제어
+  var serviceRunning = cameras.some(function(c) { return c.status !== 'stopped'; });
+  var btnStart = document.getElementById('btnStartAll');
+  var btnStop = document.getElementById('btnStopAll');
+  if (btnStart) btnStart.disabled = serviceRunning;
+  if (btnStop) btnStop.disabled = !serviceRunning;
+}
 }
 // Reload
 async function reloadConfig() {

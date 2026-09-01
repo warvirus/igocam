@@ -451,7 +451,7 @@ func (m *Manager) StopAll() {
 			cam.GoStream.Stop()
 		}
 	}
-	m.cameras = nil
+	m.cameras = []*camera.Camera{}
 }
 
 // PauseStreams 모든 카메라의 스트림 전송을 일시중지한다.

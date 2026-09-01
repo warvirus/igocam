@@ -77,7 +77,12 @@ go install github.com/AlexxIT/go2rtc@v1.9.14
 ### 2. 실행
 
 ```bash
-./bin/igocam --config bin/camera_config.json
+./bin/igocam --config bin/camera_config.json 
+
+또는
+
+./bin/igocam --config bin/camera_config.json --port 8080 --admin-user admin --admin-pass secret
+# 접속: http://192.168.0.217:8080/
 ```
 
 ### 3. 접속하기
