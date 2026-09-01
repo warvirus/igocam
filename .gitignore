@@ -38,6 +38,10 @@ ptz_presets.json
 # ── 테스트 산출물 ──
 var/
 
+# ── 환경 설정 (비밀번호 포함) ──
+.env
+.env.local
+
 # ── 프로파일 / 진단 ──
 *.prof
 *.pprof
