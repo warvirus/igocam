@@ -212,13 +212,16 @@ func (s *Server) listCameras(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
-	var cfg config.CameraConfig
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+	// DefaultConfig()를 기준으로 시작해, 프론트엔드가 보내지 않는 필드
+	// (main_stream_name, sub_stream_name, mjpeg_url, source_type 등)에
+	// 기본값을 유지한다. zero-value로 시작하면 카메라 시작이 실패한다.
+	cfg := config.DefaultConfig()
+	if err := json.NewDecoder(r.Body).Decode(cfg); err != nil {
 		jsonResp(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
 	cfg.ConfigPath = s.mgr.ConfigPath()
-	cam, err := s.mgr.AddCamera(&cfg)
+	cam, err := s.mgr.AddCamera(cfg)
 	if err != nil {
 		jsonResp(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
