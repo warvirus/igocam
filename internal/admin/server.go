@@ -186,7 +186,7 @@ func (s *Server) listCameras(w http.ResponseWriter, _ *http.Request) {
 		SnapURL       string `json:"snapshot_url"`
 		WebUIURL      string `json:"web_ui_url"`
 	}
-	var list []camInfo
+	var list []camInfo = []camInfo{} // JSON null 대신 [] 반환 (프론트엔드 .length 안전)
 	for _, cam := range s.mgr.Cameras() {
 		status := "running"
 		if cam.Streamer.IsPaused() {

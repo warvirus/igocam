@@ -252,7 +252,7 @@ function toast(msg, ok){
 
 async function refresh(){
   try {
-    cameras = await api('/api/cameras');
+    cameras = (await api('/api/cameras')) || [];
     render();
   } catch(e){ toast(e.message, false); }
 }
@@ -268,6 +268,7 @@ function statusBadge(s){
 function render(){
   var grid = document.getElementById('cameraGrid');
   var empty = document.getElementById('emptyState');
+  if (!cameras || !grid) return;
   empty.classList.toggle('hidden', cameras.length>0);
   grid.innerHTML = cameras.map(function(c){
     return '<div class="card bg-slate-800 rounded-xl overflow-hidden transition-all cursor-pointer" onclick="window.open(\''+c.web_ui_url+'\',\'_blank\')">' +
@@ -289,7 +290,7 @@ function render(){
       '</div>' +
     '</div>';
   }).join('');
-  var sr = cameras.some(function(c){ return c.status!=='stopped'; });
+  var sr = (cameras||[]).some(function(c){ return c.status!=='stopped'; });
   var bs = document.getElementById('btnStartAll');
   var bp = document.getElementById('btnStopAll');
   if(bs) bs.disabled = sr;

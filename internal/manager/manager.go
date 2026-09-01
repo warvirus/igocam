@@ -405,6 +405,9 @@ func (m *Manager) RestartCamera(id string) error {
 // ReloadFromConfig 디스크 config 파일을 다시 읽어 실행 중인 상태와 동기화한다.
 // 수동으로 JSON을 편집한 변경사항을 반영한다.
 func (m *Manager) ReloadFromConfig() (added, updated, removed []string, err error) {
+	added = []string{}
+	updated = []string{}
+	removed = []string{}
 	path := m.ConfigPath()
 	if path == "" {
 		return nil, nil, nil, fmt.Errorf("no config path")
@@ -434,7 +437,9 @@ func (m *Manager) ReloadFromConfig() (added, updated, removed []string, err erro
 	}
 
 	// 실행 중에 있지만 디스크에 없는 것 → 제거.
-	for _, cam := range m.cameras {
+	// 주의: m.cameras를 순회하면서 RemoveCamera로 동시 수정하면 슬라이스가
+	// 깨지므로 사본을 만들어 안전하게 순회한다.
+	for _, cam := range append([]*camera.Camera(nil), m.cameras...) {
 		if !diskIDs[cam.Config.ID] {
 			if err := m.RemoveCamera(cam.Config.ID); err != nil {
 				fmt.Printf("[WARN] Reload: remove camera '%s' failed: %v\n", cam.Config.Name, err)
