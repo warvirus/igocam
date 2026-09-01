@@ -49,6 +49,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/pause-streams", s.handlePauseStreams)
 	mux.HandleFunc("/api/resume-streams", s.handleResumeStreams)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/ports/available", s.handleAvailablePorts)
 
 	s.http = &http.Server{
 		Addr:              addr,
@@ -357,4 +358,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		})
 	}
 	jsonResp(w, http.StatusOK, list)
+}
+
+// handleAvailablePorts GET /api/ports/available
+func (s *Server) handleAvailablePorts(w http.ResponseWriter, _ *http.Request) {
+	ps := s.mgr.FindAvailablePorts()
+	jsonResp(w, http.StatusOK, map[string]int{
+		"onvif_port":      ps.OnvifPort,
+		"rtsp_port":       ps.RTSPPort,
+		"rtmp_port":       ps.RTMPPort,
+		"go2rtc_api_port": ps.Go2rtcAPIPort,
+		"web_port":        ps.WebPort,
+		"webrtc_port":     ps.WebRTCPort,
+	})
 }

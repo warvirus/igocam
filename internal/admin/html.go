@@ -307,11 +307,20 @@ async function resumeStreams(){ try{ await api('/api/resume-streams','POST'); to
 function openAddModal(){
   editingId=null;
   document.getElementById('modalTitle').textContent='카메라 추가';
-  ['f_name','f_source','f_onvif','f_rtsp','f_rtmp','f_api','f_web','f_webrtc','f_main_w','f_main_h','f_main_fps','f_main_br','f_sub_w','f_sub_h','f_sub_fps','f_sub_br'].forEach(function(id){ document.getElementById(id).value=''; });
+  ['f_name','f_source','f_main_w','f_main_h','f_main_fps','f_main_br','f_sub_w','f_sub_h','f_sub_fps','f_sub_br'].forEach(function(id){ document.getElementById(id).value=''; });
   document.getElementById('f_hw_accel').value='videotoolbox';
   document.getElementById('f_bypass').value='false';
   document.getElementById('f_main_fps').value=30; document.getElementById('f_main_br').value='1M';
   document.getElementById('f_sub_fps').value=30; document.getElementById('f_sub_br').value='500K';
+  // 포트 자동 제안: 기존 카메라 최대 포트 +10
+  api('/api/ports/available').then(function(p){
+    document.getElementById('f_onvif').value=p.onvif_port;
+    document.getElementById('f_rtsp').value=p.rtsp_port;
+    document.getElementById('f_rtmp').value=p.rtmp_port;
+    document.getElementById('f_api').value=p.go2rtc_api_port;
+    document.getElementById('f_web').value=p.web_port;
+    document.getElementById('f_webrtc').value=p.webrtc_port;
+  }).catch(function(){});
   document.getElementById('modal').classList.remove('hidden'); document.getElementById('modal').classList.add('flex');
 }
 function openEditModal(id){

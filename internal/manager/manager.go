@@ -198,7 +198,8 @@ func (m *Manager) CameraByID(id string) *camera.Camera {
 	return nil
 }
 
-// FindAvailablePorts 현재 등록된 카메라 포트를 기준으로 충돌 없는 포트 세트를 제안한다.
+// FindAvailablePorts 현재 등록된 카메라의 각 포트 family별 최대값 +10으로
+// 충돌 없는 새 포트 세트를 제안한다. (예: cam1 onvif=8090 → 신규 8100)
 func (m *Manager) FindAvailablePorts() PortSet {
 	used := map[int]bool{}
 	for _, cfg := range m.configs {
@@ -209,21 +210,28 @@ func (m *Manager) FindAvailablePorts() PortSet {
 		used[cfg.WebPort] = true
 		used[cfg.WebRTCPort] = true
 	}
-	next := func(base, step int) int {
+	next := func(base int, f func(*config.CameraConfig) int) int {
 		p := base
+		for _, cfg := range m.configs {
+			v := f(cfg)
+			if v > p {
+				p = v
+			}
+		}
+		p += 10
 		for used[p] {
-			p += step
+			p += 10
 		}
 		used[p] = true
 		return p
 	}
 	return PortSet{
-		OnvifPort:     next(8090, 10),
-		RTSPPort:      next(8553, 10),
-		RTMPPort:      next(1934, 10),
-		Go2rtcAPIPort: next(1984, 10),
-		WebPort:       next(8091, 10),
-		WebRTCPort:    next(8554, 10),
+		OnvifPort:     next(8090, func(c *config.CameraConfig) int { return c.OnvifPort }),
+		RTSPPort:      next(8553, func(c *config.CameraConfig) int { return c.RTSPPort }),
+		RTMPPort:      next(1934, func(c *config.CameraConfig) int { return c.RTMPPort }),
+		Go2rtcAPIPort: next(1984, func(c *config.CameraConfig) int { return c.Go2rtcAPIPort }),
+		WebPort:       next(8091, func(c *config.CameraConfig) int { return c.WebPort }),
+		WebRTCPort:    next(8554, func(c *config.CameraConfig) int { return c.WebRTCPort }),
 	}
 }
 
