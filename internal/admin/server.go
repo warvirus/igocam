@@ -347,7 +347,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		Status string  `json:"status"` // "running", "paused"
 		FPS    float64 `json:"fps"`
 	}
-	var list []camStatus
+	var list []camStatus = []camStatus{}
 	for _, cam := range s.mgr.Cameras() {
 		status := "running"
 		if cam.Streamer.IsPaused() {
