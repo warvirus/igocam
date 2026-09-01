@@ -169,7 +169,6 @@ function render() {
   if (btnStart) btnStart.disabled = serviceRunning;
   if (btnStop) btnStop.disabled = !serviceRunning;
 }
-}
 // Reload
 async function reloadConfig() {
   try { const d = await api('/api/reload','POST'); toast('Reload 완료: +'+d.added.length+' / ~'+d.updated.length+' / -'+d.removed.length); await refresh(); }
