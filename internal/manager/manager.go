@@ -171,6 +171,303 @@ func (m *Manager) RunForever() int {
 	return 0
 }
 
+// ConfigPath config 파일 경로 반환 (첫 번째 config 기준).
+func (m *Manager) ConfigPath() string {
+	if len(m.configs) == 0 {
+		return ""
+	}
+	return m.configs[0].ConfigPath
+}
+
+// CameraByID ID로 카메라 조회.
+func (m *Manager) CameraByID(id string) *camera.Camera {
+	for _, c := range m.cameras {
+		if c.Config.ID == id {
+			return c
+		}
+	}
+	return nil
+}
+
+// FindAvailablePorts 현재 등록된 카메라 포트를 기준으로 충돌 없는 포트 세트를 제안한다.
+func (m *Manager) FindAvailablePorts() PortSet {
+	used := map[int]bool{}
+	for _, cfg := range m.configs {
+		used[cfg.OnvifPort] = true
+		used[cfg.RTSPPort] = true
+		used[cfg.RTMPPort] = true
+		used[cfg.Go2rtcAPIPort] = true
+		used[cfg.WebPort] = true
+		used[cfg.WebRTCPort] = true
+	}
+	next := func(base, step int) int {
+		p := base
+		for used[p] {
+			p += step
+		}
+		used[p] = true
+		return p
+	}
+	return PortSet{
+		OnvifPort:     next(8090, 10),
+		RTSPPort:      next(8553, 10),
+		RTMPPort:      next(1934, 10),
+		Go2rtcAPIPort: next(1984, 10),
+		WebPort:       next(8091, 10),
+		WebRTCPort:    next(8554, 10),
+	}
+}
+
+// PortSet 카메라 포트 묶음.
+type PortSet struct {
+	OnvifPort     int
+	RTSPPort      int
+	RTMPPort      int
+	Go2rtcAPIPort int
+	WebPort       int
+	WebRTCPort    int
+}
+
+// applyToConfig 포트 세트를 cfg에 적용한다.
+func (ps PortSet) applyToConfig(cfg *config.CameraConfig) {
+	cfg.OnvifPort = ps.OnvifPort
+	cfg.RTSPPort = ps.RTSPPort
+	cfg.RTMPPort = ps.RTMPPort
+	cfg.Go2rtcAPIPort = ps.Go2rtcAPIPort
+	cfg.WebPort = ps.WebPort
+	cfg.WebRTCPort = ps.WebRTCPort
+}
+
+// startCamera 하나의 카메라를 시작한다 (AddCamera / StartAll에서 사용).
+func (m *Manager) startCamera(cfg *config.CameraConfig) (*camera.Camera, error) {
+	cam := camera.New(cfg)
+
+	// go2rtc config 작성.
+	go2rtcPath := filepath.Join("data", fmt.Sprintf("go2rtc_%s.yaml", cfg.Name))
+	cs := gostream.CameraStream{
+		MainStream: cfg.MainStreamName,
+		SubStream:  cfg.SubStreamName,
+		APIPort:    cfg.Go2rtcAPIPort,
+		RTSPPort:   cfg.RTSPPort,
+		RTMPPort:   cfg.RTMPPort,
+		WebRTCPort: cfg.WebRTCPort,
+	}
+	if cfg.Bypass {
+		srcType, _ := capture.InferSourceType(cfg.Source)
+		switch srcType {
+		case capture.SourceVideoFile:
+			cs.Source = "ffmpeg:" + cfg.Source
+		default:
+			cs.Source = cfg.Source
+		}
+	}
+	if err := gostream.WriteGo2rtcConfig(go2rtcPath, cs); err != nil {
+		return nil, fmt.Errorf("write go2rtc config: %w", err)
+	}
+	goStream := gostream.New(gostream.Config{
+		Go2rtcBin:  m.go2rtcBin,
+		ConfigPath: go2rtcPath,
+		APIPort:    cfg.Go2rtcAPIPort,
+		RTSPPort:   cfg.RTSPPort,
+		RTMPPort:   cfg.RTMPPort,
+		WebRTCPort: cfg.WebRTCPort,
+	})
+	if err := goStream.Start(); err != nil {
+		return nil, fmt.Errorf("go2rtc start: %w", err)
+	}
+	cam.SetGoStream(goStream)
+
+	srv := httpserver.New(cam)
+	cam.SetHTTPServer(srv)
+
+	if !cam.Start(false) {
+		goStream.Stop()
+		return nil, fmt.Errorf("camera start failed")
+	}
+	return cam, nil
+}
+
+// AddCamera 새 카메라를 동적으로 추가하고 시작한다.
+func (m *Manager) AddCamera(cfg *config.CameraConfig) (*camera.Camera, error) {
+	cfg.EnsureID()
+	if cfg.OnvifPort == 0 {
+		ps := m.FindAvailablePorts()
+		ps.applyToConfig(cfg)
+	}
+	cam, err := m.startCamera(cfg)
+	if err != nil {
+		return nil, err
+	}
+	m.configs = append(m.configs, cfg)
+	m.cameras = append(m.cameras, cam)
+	if err := config.SaveAll(cfg.ConfigPath, m.configs); err != nil {
+		fmt.Printf("[WARN] Camera '%s': config save failed: %v\n", cfg.Name, err)
+	}
+	m.wg.Add(1)
+	go m.captureLoop(cam)
+	fmt.Printf("  [OK] Camera '%s' added on :%d\n", cfg.Name, cfg.OnvifPort)
+	return cam, nil
+}
+
+// RemoveCamera 카메라를 동적으로 제거하고 정지한다.
+func (m *Manager) RemoveCamera(id string) error {
+	idx := -1
+	var cam *camera.Camera
+	for i, c := range m.cameras {
+		if c.Config.ID == id {
+			idx = i
+			cam = c
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("camera not found: %s", id)
+	}
+
+	cam.Stop()
+	if cam.GoStream != nil {
+		cam.GoStream.Stop()
+	}
+
+	m.cameras = append(m.cameras[:idx], m.cameras[idx+1:]...)
+	cfgIdx := -1
+	for i, cfg := range m.configs {
+		if cfg.ID == id {
+			cfgIdx = i
+			break
+		}
+	}
+	if cfgIdx >= 0 {
+		m.configs = append(m.configs[:cfgIdx], m.configs[cfgIdx+1:]...)
+	}
+	if err := config.SaveAll(m.ConfigPath(), m.configs); err != nil {
+		fmt.Printf("[WARN] remove camera %s: config save failed: %v\n", id, err)
+	}
+	fmt.Printf("  [OK] Camera '%s' removed\n", cam.Config.Name)
+	return nil
+}
+
+// UpdateCamera 카메라 설정을 변경하고 필요 시 재시작한다.
+func (m *Manager) UpdateCamera(id string, updates map[string]any) error {
+	cam := m.CameraByID(id)
+	if cam == nil {
+		return fmt.Errorf("camera not found: %s", id)
+	}
+	cfg := cam.Config
+	applied, rejected, restartKeys := cfg.ApplyUpdates(updates)
+	if len(rejected) > 0 {
+		return fmt.Errorf("rejected fields: %v", rejected)
+	}
+	if len(applied) == 0 {
+		return nil
+	}
+	if err := config.SaveAll(m.ConfigPath(), m.configs); err != nil {
+		return fmt.Errorf("config save: %w", err)
+	}
+	if len(restartKeys) > 0 {
+		return m.RestartCamera(id)
+	}
+	return nil
+}
+
+// RestartCamera 카메라를 재시작한다 (Remove + Add).
+func (m *Manager) RestartCamera(id string) error {
+	cam := m.CameraByID(id)
+	if cam == nil {
+		return fmt.Errorf("camera not found: %s", id)
+	}
+	cfg := cam.Config
+	if err := m.RemoveCamera(id); err != nil {
+		return err
+	}
+	_, err := m.AddCamera(cfg)
+	return err
+}
+
+// ReloadFromConfig 디스크 config 파일을 다시 읽어 실행 중인 상태와 동기화한다.
+// 수동으로 JSON을 편집한 변경사항을 반영한다.
+func (m *Manager) ReloadFromConfig() (added, updated, removed []string, err error) {
+	path := m.ConfigPath()
+	if path == "" {
+		return nil, nil, nil, fmt.Errorf("no config path")
+	}
+	diskConfigs, err := config.LoadAll(path)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("load config: %w", err)
+	}
+
+	// 현재 실행 중인 ID 맵.
+	running := map[string]int{} // id → camera index
+	for i, cam := range m.cameras {
+		running[cam.Config.ID] = i
+	}
+
+	// 디스크에 있지만 실행 중에 없는 것 → 추가.
+	diskIDs := map[string]bool{}
+	for _, dc := range diskConfigs {
+		diskIDs[dc.ID] = true
+		if _, exists := running[dc.ID]; !exists {
+			if _, err := m.AddCamera(dc); err != nil {
+				fmt.Printf("[WARN] Reload: add camera '%s' failed: %v\n", dc.Name, err)
+				continue
+			}
+			added = append(added, dc.Name)
+		}
+	}
+
+	// 실행 중에 있지만 디스크에 없는 것 → 제거.
+	for _, cam := range m.cameras {
+		if !diskIDs[cam.Config.ID] {
+			if err := m.RemoveCamera(cam.Config.ID); err != nil {
+				fmt.Printf("[WARN] Reload: remove camera '%s' failed: %v\n", cam.Config.Name, err)
+				continue
+			}
+			removed = append(removed, cam.Config.Name)
+		}
+	}
+
+	// 추가/제거 후 나머지에 대해 RestartStream으로 변경 반영.
+	// (실제 diff 검증은 추후 고도화)
+	return added, updated, removed, nil
+}
+
+// StartAll 모든 카메라를 시작한다 (이미 실행 중인 것은 무시).
+func (m *Manager) StartAll() {
+	for _, cfg := range m.configs {
+		if m.CameraByID(cfg.ID) != nil {
+			continue
+		}
+		if _, err := m.AddCamera(cfg); err != nil {
+			fmt.Printf("[ERR] StartAll: camera '%s': %v\n", cfg.Name, err)
+		}
+	}
+}
+
+// StopAll 모든 카메라를 완전 정지한다 (config 유지).
+func (m *Manager) StopAll() {
+	for _, cam := range m.cameras {
+		cam.Stop()
+		if cam.GoStream != nil {
+			cam.GoStream.Stop()
+		}
+	}
+	m.cameras = nil
+}
+
+// PauseStreams 모든 카메라의 스트림 전송을 일시중지한다.
+func (m *Manager) PauseStreams() {
+	for _, cam := range m.cameras {
+		cam.Streamer.Pause()
+	}
+}
+
+// ResumeStreams 일시중지된 스트림 전송을 재개한다.
+func (m *Manager) ResumeStreams() {
+	for _, cam := range m.cameras {
+		cam.Streamer.Resume()
+	}
+}
+
 // Stop 캡처 루프, 카메라, discovery를 정지한다.
 func (m *Manager) Stop() {
 	close(m.stopCh)

@@ -2,9 +2,11 @@
 package config
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -79,6 +81,7 @@ const (
 // CameraConfig 카메라 완전 설정.
 type CameraConfig struct {
 	// Identity
+	ID              string `json:"id"`
 	Name            string `json:"name"`
 	Manufacturer    string `json:"manufacturer"`
 	Model           string `json:"model"`
@@ -521,6 +524,66 @@ func (c *CameraConfig) Save(filePath string) error {
 	return os.Rename(tmpName, filePath)
 }
 
+// GenerateID 고유 카메라 ID 생성 (cam_ + 8바이트 랜덤 hex).
+func GenerateID() string {
+	const charset = "0123456789abcdef"
+	b := make([]byte, 8)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			return fmt.Sprintf("cam_%x", b)
+		}
+		b[i] = charset[n.Int64()]
+	}
+	return "cam_" + string(b)
+}
+
+// EnsureID ID가 없으면 생성하여 설정한다.
+func (c *CameraConfig) EnsureID() {
+	if c.ID == "" {
+		c.ID = GenerateID()
+	}
+}
+
+// SaveAll config 배열 전체를 JSON 파일로 원자적으로 저장한다.
+func SaveAll(filePath string, configs []*CameraConfig) error {
+	if filePath == "" {
+		filePath = DefaultConfigPath
+	}
+	type exportConfig CameraConfig
+	exported := make([]exportConfig, len(configs))
+	for i, cfg := range configs {
+		exported[i] = exportConfig(*cfg)
+		exported[i].LocalIP = ""
+	}
+	data, err := json.MarshalIndent(exported, "", "  ")
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".camera_config_*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, filePath)
+}
+
 // Load 설정 파일에서 로드. 없으면 기본값 반환.
 // 반환된 config는 저장 시 같은 파일로 되돌아가도록 filePath를 기억한다.
 func Load(filePath string) *CameraConfig {
@@ -571,6 +634,7 @@ func LoadAll(filePath string) ([]*CameraConfig, error) {
 			return nil, fmt.Errorf("camera #%d in %s: %w", i, filePath, err)
 		}
 		cfg.ConfigPath = filePath
+		cfg.EnsureID()
 		if cfg.LocalIP == "" {
 			cfg.LocalIP = GetLocalIP()
 		}

@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -123,6 +124,7 @@ type Streamer struct {
 	rtmpURLSub    string
 	isRunning     bool
 	writerRunning bool
+	paused        atomic.Bool
 	shutdown      chan struct{}
 	frameQueue    *frame.Queue
 	writerDone    chan struct{}
@@ -286,6 +288,21 @@ func (s *Streamer) Stream(f *frame.Frame) bool {
 	return true
 }
 
+// Pause 스트림 전송을 일시중지한다. 프레임 캡처/Web UI/ONVIF는 계속 동작한다.
+func (s *Streamer) Pause() {
+	s.paused.Store(true)
+}
+
+// Resume 일시중지된 스트림 전송을 재개한다.
+func (s *Streamer) Resume() {
+	s.paused.Store(false)
+}
+
+// IsPaused 스트림이 일시중지 상태인지 여부.
+func (s *Streamer) IsPaused() bool {
+	return s.paused.Load()
+}
+
 // startWriter 프레임 큐를 ffmpeg stdin으로 전달하는 워커를 시작한다.
 func (s *Streamer) startWriter() {
 	s.mu.Lock()
@@ -345,6 +362,16 @@ func (s *Streamer) writeLoop() {
 			continue
 		}
 		f := item.(*frame.Frame)
+
+		// 일시중지 상태에서는 프레임을 인코딩/전송하지 않고 버린다.
+		// (go2rtc에는 데이터가 전달되지 않아 스트림이 정지된 것처럼 보인다)
+		if s.paused.Load() {
+			f.Release()
+			s.mu.Lock()
+			s.Stats.DroppedFrames++
+			s.mu.Unlock()
+			continue
+		}
 
 		// 독립 복사본: OpenCV Mat은 스레드 안전하지 않으므로 원본을 공유하지 않는다.
 		mat := f.Mat.Clone()
