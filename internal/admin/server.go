@@ -156,6 +156,9 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// 브라우저 캐시 방지: HTML/JS 변경이 즉시 반영되도록 항상 최신본을 받는다.
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
 	io.WriteString(w, adminHTML)
 }
 
