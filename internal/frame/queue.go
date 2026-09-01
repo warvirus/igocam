@@ -29,10 +29,15 @@ func NewQueue(maxsize int) *Queue {
 }
 
 // Put 항목을 블로킹 없이 추가. 가득 차면 가장 오래된 항목을 제거한다.
-// 닫힌 큐에는 저장하지 않고 false를 반환한다.
+// 닫힌 큐에는 저장하지 않고, 항목이 소비자에게 넘어가지 않으므로 OnDrop을
+// 호출해 호출자가 보유한 참조(예: frame.Frame의 Retain)가 누수되지 않게 한다.
 // 반환값: 저장했으면 true, 항목을 버렸으면 false.
 func (q *Queue) Put(item any) bool {
 	if q.closed.Load() {
+		q.dropped.Add(1)
+		if q.OnDrop != nil {
+			q.OnDrop(item)
+		}
 		return false
 	}
 	select {

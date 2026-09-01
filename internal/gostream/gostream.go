@@ -171,11 +171,18 @@ func checkTCPPort(port int) bool {
 
 // WriteGo2rtcConfig 한 카메라의 go2rtc.yaml을 생성한다.
 // IPyCam 패턴: 카메라마다 자체 go2rtc 인스턴스 (자체 포트) 사용.
+// Source가 비어 있지 않으면 bypass 모드: go2rtc가 소스를 직접 읽어
+// 트랜스코딩 없이 전송한다 (서브는 메인을 참조 복사).
 func WriteGo2rtcConfig(path string, cam CameraStream) error {
 	var sb strings.Builder
 	sb.WriteString("streams:\n")
-	sb.WriteString(fmt.Sprintf("  %s: null\n", cam.MainStream))
-	sb.WriteString(fmt.Sprintf("  %s: null\n", cam.SubStream))
+	if cam.Source != "" {
+		sb.WriteString(fmt.Sprintf("  %s: %s\n", cam.MainStream, cam.Source))
+		sb.WriteString(fmt.Sprintf("  %s: %s\n", cam.SubStream, cam.MainStream))
+	} else {
+		sb.WriteString(fmt.Sprintf("  %s: null\n", cam.MainStream))
+		sb.WriteString(fmt.Sprintf("  %s: null\n", cam.SubStream))
+	}
 	sb.WriteString(fmt.Sprintf("\napi:\n  listen: \":%d\"\n", cam.APIPort))
 	sb.WriteString(fmt.Sprintf("rtsp:\n  listen: \":%d\"\n", cam.RTSPPort))
 	sb.WriteString(fmt.Sprintf("rtmp:\n  listen: \":%d\"\n", cam.RTMPPort))
@@ -197,4 +204,6 @@ type CameraStream struct {
 	RTSPPort   int
 	RTMPPort   int
 	WebRTCPort int
+	// Source가 비어 있지 않으면 bypass 모드: go2rtc가 이 소스를 직접 읽는다.
+	Source string
 }

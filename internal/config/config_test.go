@@ -126,7 +126,7 @@ func TestValidateUpdate(t *testing.T) {
 func TestApplyUpdates(t *testing.T) {
 	cfg := DefaultConfig()
 	applied, rejected, restart := cfg.ApplyUpdates(map[string]any{
-		"main_width": 1280,
+		"main_width":  1280,
 		"main_height": 720,
 		"flip":        true,
 		"rotation":    90,

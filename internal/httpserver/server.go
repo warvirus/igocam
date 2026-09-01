@@ -23,7 +23,7 @@ import (
 	"igocam/internal/config"
 )
 
-const maxUploadBytes = 500 * 1024 * 1024 // 500 MB
+const maxUploadBytes = 2000 * 1024 * 1024 // 2GB
 
 //go:embed templates/index.html
 var webUIHTML string
@@ -68,6 +68,10 @@ func (s *Server) Start() error {
 	s.http = &http.Server{
 		Addr:    addr,
 		Handler: mux,
+		// 좀비 keep-alive 연결 방지. MJPEG 스트리밍은 지속적으로 응답을 쓰므로
+		// WriteTimeout을 설정하지 않아도 IdleTimeout에 걸리지 않는다.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -156,19 +160,19 @@ func (s *Server) renderWebUI() string {
 	mjpegURL := fmt.Sprintf("http://%s:%d/%s", ip, s.config.WebPort, s.config.MjpegURL)
 
 	repl := map[string]string{
-		"{{camera_name}}":    s.config.Name,
-		"{{preview_url}}":    previewURL,
-		"{{main_rtsp}}":      s.config.MainStreamRTSP(),
-		"{{sub_rtsp}}":       s.config.SubStreamRTSP(),
-		"{{onvif_url}}":      s.config.OnvifURL(),
-		"{{webrtc_url}}":     s.config.WebRTCURL(),
-		"{{mjpeg_url}}":      mjpegURL,
-		"{{main_stream_name}}": s.config.MainStreamName,
-		"{{sub_stream_name}}":  s.config.SubStreamName,
-		"{{source_icon}}":    "❓",
+		"{{camera_name}}":       s.config.Name,
+		"{{preview_url}}":       previewURL,
+		"{{main_rtsp}}":         s.config.MainStreamRTSP(),
+		"{{sub_rtsp}}":          s.config.SubStreamRTSP(),
+		"{{onvif_url}}":         s.config.OnvifURL(),
+		"{{webrtc_url}}":        s.config.WebRTCURL(),
+		"{{mjpeg_url}}":         mjpegURL,
+		"{{main_stream_name}}":  s.config.MainStreamName,
+		"{{sub_stream_name}}":   s.config.SubStreamName,
+		"{{source_icon}}":       "❓",
 		"{{source_type_label}}": "Unknown Source",
-		"{{source_info}}":    s.config.SourceInfo,
-		"{{version}}":        config.Version,
+		"{{source_info}}":       s.config.SourceInfo,
+		"{{version}}":           config.Version,
 	}
 	html := webUIHTML
 	for k, v := range repl {
@@ -213,35 +217,40 @@ func (s *Server) serveConfig(w http.ResponseWriter) {
 		"name": s.config.Name, "manufacturer": s.config.Manufacturer,
 		"model": s.config.Model, "serial_number": s.config.SerialNumber,
 		"firmware_version": s.config.FirmwareVersion,
-		"onvif_port": s.config.OnvifPort, "rtsp_port": s.config.RTSPPort,
+		"onvif_port":       s.config.OnvifPort, "rtsp_port": s.config.RTSPPort,
 		"rtmp_port": s.config.RTMPPort, "web_port": s.config.WebPort,
 		"go2rtc_api_port": s.config.Go2rtcAPIPort,
-		"auth_enabled": s.config.AuthEnabled(),
-		"main_width": s.config.MainWidth, "main_height": s.config.MainHeight,
+		"auth_enabled":    s.config.AuthEnabled(),
+		"main_width":      s.config.MainWidth, "main_height": s.config.MainHeight,
 		"main_fps": s.config.MainFPS, "main_bitrate": s.config.MainBitrate,
-		"main_stream_name": s.config.MainStreamName,
-		"sub_width": s.config.SubWidth, "sub_height": s.config.SubHeight,
+		"main_keyframe_interval": s.config.MainKeyframeInterval,
+		"main_options":           s.config.MainOptions,
+		"main_stream_name":       s.config.MainStreamName,
+		"sub_width":              s.config.SubWidth, "sub_height": s.config.SubHeight,
 		"sub_fps": s.config.SubFPS, "sub_bitrate": s.config.SubBitrate,
-		"sub_stream_name": s.config.SubStreamName,
-		"hw_accel": s.config.HWAccel,
-		"show_timestamp": s.config.ShowTimestamp,
-		"timestamp_format": s.config.TimestampFormat,
-		"timestamp_position": s.config.TimestampPosition,
-		"flip": s.config.Flip, "mirror": s.config.Mirror, "rotation": s.config.Rotation,
-		"recording_enabled": s.config.RecordingEnabled,
-		"recording_format": s.config.RecordingFormat,
-		"recording_path": s.config.RecordingPath,
+		"sub_keyframe_interval": s.config.SubKeyframeInterval,
+		"sub_options":           s.config.SubOptions,
+		"sub_stream_name":       s.config.SubStreamName,
+		"hw_accel":              s.config.HWAccel,
+		"bypass":                s.config.Bypass,
+		"show_timestamp":        s.config.ShowTimestamp,
+		"timestamp_format":      s.config.TimestampFormat,
+		"timestamp_position":    s.config.TimestampPosition,
+		"flip":                  s.config.Flip, "mirror": s.config.Mirror, "rotation": s.config.Rotation,
+		"recording_enabled":     s.config.RecordingEnabled,
+		"recording_format":      s.config.RecordingFormat,
+		"recording_path":        s.config.RecordingPath,
 		"recording_max_file_mb": s.config.RecordingMaxFileMB,
 		"recording_pre_seconds": s.config.RecordingPreSec,
-		"source_type": s.config.SourceType, "source_info": s.config.SourceInfo,
-		"main_stream_rtsp": s.config.MainStreamRTSP(),
-		"sub_stream_rtsp": s.config.SubStreamRTSP(),
-		"webrtc_url": s.config.WebRTCURL(),
-		"mjpeg_url": fmt.Sprintf("http://%s:%d/%s", ip, s.config.WebPort, s.config.MjpegURL),
-		"streaming_mode": "go2rtc",
+		"source_type":           s.config.SourceType, "source_info": s.config.SourceInfo,
+		"main_stream_rtsp":  s.config.MainStreamRTSP(),
+		"sub_stream_rtsp":   s.config.SubStreamRTSP(),
+		"webrtc_url":        s.config.WebRTCURL(),
+		"mjpeg_url":         fmt.Sprintf("http://%s:%d/%s", ip, s.config.WebPort, s.config.MjpegURL),
+		"streaming_mode":    "go2rtc",
 		"video_upload_mode": s.camera.VideoUploadModeValue(),
-		"current_video": filepath.Base(s.camera.GetCurrentVideoPath()),
-		"video_error": s.camera.GetVideoError(),
+		"current_video":     filepath.Base(s.camera.GetCurrentVideoPath()),
+		"video_error":       s.camera.GetVideoError(),
 	}
 	s.jsonOK(w, cfg)
 }
@@ -314,25 +323,25 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	mjpeg := s.camera.MJPEG
 	stats := map[string]any{
-		"streaming_mode": "go2rtc",
-		"is_streaming":   true,
-		"mjpeg_frames_sent": mjpeg.FramesSent(),
-		"mjpeg_fps":       round1(mjpeg.ActualFPS()),
+		"streaming_mode":     "go2rtc",
+		"is_streaming":       true,
+		"mjpeg_frames_sent":  mjpeg.FramesSent(),
+		"mjpeg_fps":          round1(mjpeg.ActualFPS()),
 		"mjpeg_elapsed_time": round1(mjpeg.ElapsedTime()),
-		"mjpeg_clients":   mjpeg.ClientCount(),
-		"frames_sent":     mjpeg.FramesSent(),
-		"actual_fps":      round1(mjpeg.ActualFPS()),
-		"elapsed_time":    round1(mjpeg.ElapsedTime()),
-		"dropped_frames":  mjpeg.FramesDropped(),
+		"mjpeg_clients":      mjpeg.ClientCount(),
+		"frames_sent":        mjpeg.FramesSent(),
+		"actual_fps":         round1(mjpeg.ActualFPS()),
+		"elapsed_time":       round1(mjpeg.ElapsedTime()),
+		"dropped_frames":     mjpeg.FramesDropped(),
 	}
 	rec := s.camera.RecordingStats()
 	stats["recording"] = map[string]any{
-		"recording": rec["recording"],
-		"file":      filepath.Base(fmt.Sprint(rec["file"])),
-		"segments":  rec["segments"],
+		"recording":      rec["recording"],
+		"file":           filepath.Base(fmt.Sprint(rec["file"])),
+		"segments":       rec["segments"],
 		"frames_written": rec["frames_written"],
-		"dropped":   rec["dropped"],
-		"bytes":     rec["bytes"],
+		"dropped":        rec["dropped"],
+		"bytes":          rec["bytes"],
 	}
 	s.jsonOK(w, stats)
 }
@@ -426,12 +435,12 @@ func (s *Server) handleVideo(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/status"):
 		s.jsonOK(w, map[string]any{
-			"video_upload_mode": s.camera.VideoUploadModeValue(),
-			"current_video":     filepath.Base(s.camera.GetCurrentVideoPath()),
+			"video_upload_mode":  s.camera.VideoUploadModeValue(),
+			"current_video":      filepath.Base(s.camera.GetCurrentVideoPath()),
 			"current_video_path": s.camera.GetCurrentVideoPath(),
-			"video_error":       s.camera.GetVideoError(),
-			"source_type":       s.config.SourceType,
-			"source_info":       s.config.SourceInfo,
+			"video_error":        s.camera.GetVideoError(),
+			"source_type":        s.config.SourceType,
+			"source_info":        s.config.SourceInfo,
 		})
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/upload"):
 		s.handleVideoUpload(w, r)

@@ -24,8 +24,10 @@ var Version = "1.3.0"
 // POST body로 덮어쓸 수 없도록 의도적으로 제외한다.
 var EditableFields = map[string]bool{
 	"main_width": true, "main_height": true, "main_fps": true, "main_bitrate": true,
+	"main_keyframe_interval": true, "main_options": true,
 	"main_stream_name": true, "sub_width": true, "sub_height": true, "sub_fps": true,
-	"sub_bitrate": true, "sub_stream_name": true, "hw_accel": true,
+	"sub_bitrate": true, "sub_keyframe_interval": true, "sub_options": true,
+	"sub_stream_name": true, "hw_accel": true, "bypass": true,
 	"name": true, "manufacturer": true, "model": true,
 	"show_timestamp": true, "timestamp_format": true, "timestamp_position": true,
 	"flip": true, "mirror": true, "rotation": true,
@@ -40,12 +42,15 @@ var EditableFields = map[string]bool{
 // flip/mirror는 프레임 크기를 바꾸지 않아 재시작 불필요.
 var RestartFields = map[string]bool{
 	"main_width": true, "main_height": true, "main_fps": true, "main_bitrate": true,
-	"sub_width": true, "sub_height": true, "sub_bitrate": true, "hw_accel": true,
+	"main_keyframe_interval": true, "main_options": true,
+	"sub_width": true, "sub_height": true, "sub_bitrate": true,
+	"sub_keyframe_interval": true, "sub_options": true,
+	"hw_accel": true, "bypass": true,
 	"rotation": true,
 }
 
 // ValidHwAccel 유효한 하드웨어 가속 값.
-var ValidHwAccel = map[string]bool{"auto": true, "nvenc": true, "qsv": true, "cpu": true}
+var ValidHwAccel = map[string]bool{"auto": true, "nvenc": true, "qsv": true, "videotoolbox": true, "cpu": true}
 
 // ValidTimestampPositions 유효한 타임스탬프 위치.
 var ValidTimestampPositions = map[string]bool{
@@ -95,18 +100,22 @@ type CameraConfig struct {
 	Password string `json:"password"`
 
 	// Main stream
-	MainWidth      int    `json:"main_width"`
-	MainHeight     int    `json:"main_height"`
-	MainFPS        int    `json:"main_fps"`
-	MainBitrate    string `json:"main_bitrate"`
-	MainStreamName string `json:"main_stream_name"`
+	MainWidth            int    `json:"main_width"`
+	MainHeight           int    `json:"main_height"`
+	MainFPS              int    `json:"main_fps"`
+	MainBitrate          string `json:"main_bitrate"`
+	MainStreamName       string `json:"main_stream_name"`
+	MainKeyframeInterval int    `json:"main_keyframe_interval"`
+	MainOptions          string `json:"main_options"`
 
 	// Sub stream
-	SubWidth      int    `json:"sub_width"`
-	SubHeight     int    `json:"sub_height"`
-	SubFPS        int    `json:"sub_fps"`
-	SubBitrate    string `json:"sub_bitrate"`
-	SubStreamName string `json:"sub_stream_name"`
+	SubWidth            int    `json:"sub_width"`
+	SubHeight           int    `json:"sub_height"`
+	SubFPS              int    `json:"sub_fps"`
+	SubBitrate          string `json:"sub_bitrate"`
+	SubStreamName       string `json:"sub_stream_name"`
+	SubKeyframeInterval int    `json:"sub_keyframe_interval"`
+	SubOptions          string `json:"sub_options"`
 
 	// MJPEG fallback
 	MjpegURL    string `json:"mjpeg_url"`
@@ -114,6 +123,10 @@ type CameraConfig struct {
 
 	// HW accel
 	HWAccel string `json:"hw_accel"`
+
+	// Bypass: true면 소스가 이미 H.264(파일/RTSP)일 때 go2rtc가 소스를 직접
+	// 읽어 트랜스코딩 없이 전송한다. 카메라 디바이스/업로드 모드에는 적용 불가.
+	Bypass bool `json:"bypass"`
 
 	// Overlay
 	ShowTimestamp     bool   `json:"show_timestamp"`
@@ -146,38 +159,38 @@ type CameraConfig struct {
 // DefaultConfig 기본값으로 카메라 설정 생성.
 func DefaultConfig() *CameraConfig {
 	return &CameraConfig{
-		Name:            "Virtual Camera",
-		Manufacturer:    "GoCam",
-		Model:           "VirtualCam-1",
-		SerialNumber:    "GO-000001",
-		FirmwareVersion: Version,
-		OnvifPort:       8080,
-		RTSPPort:        8554,
-		RTMPPort:        1935,
-		WebPort:         8081,
-		Go2rtcAPIPort:   1984,
-		WebRTCPort:      8555,
-		MainWidth:       1920,
-		MainHeight:      1080,
-		MainFPS:         30,
-		MainBitrate:     "8M",
-		MainStreamName:  "video_main",
-		SubWidth:        640,
-		SubHeight:       360,
-		SubFPS:          30,
-		SubBitrate:      "1M",
-		SubStreamName:   "video_sub",
-		MjpegURL:        "stream.mjpeg",
-		SnapshotURL:     "snapshot.jpg",
-		HWAccel:         "auto",
-		ShowTimestamp:   true,
-		TimestampFormat: "%Y-%m-%d %H:%M:%S",
-		TimestampPosition: "bottom-left",
-		RecordingFormat: "mp4",
-		RecordingPath:   "recordings",
+		Name:               "Virtual Camera",
+		Manufacturer:       "GoCam",
+		Model:              "VirtualCam-1",
+		SerialNumber:       "GO-000001",
+		FirmwareVersion:    Version,
+		OnvifPort:          8080,
+		RTSPPort:           8554,
+		RTMPPort:           1935,
+		WebPort:            8081,
+		Go2rtcAPIPort:      1984,
+		WebRTCPort:         8555,
+		MainWidth:          1920,
+		MainHeight:         1080,
+		MainFPS:            30,
+		MainBitrate:        "8M",
+		MainStreamName:     "video_main",
+		SubWidth:           640,
+		SubHeight:          360,
+		SubFPS:             30,
+		SubBitrate:         "1M",
+		SubStreamName:      "video_sub",
+		MjpegURL:           "stream.mjpeg",
+		SnapshotURL:        "snapshot.jpg",
+		HWAccel:            "auto",
+		ShowTimestamp:      true,
+		TimestampFormat:    "%Y-%m-%d %H:%M:%S",
+		TimestampPosition:  "bottom-left",
+		RecordingFormat:    "mp4",
+		RecordingPath:      "recordings",
 		RecordingMaxFileMB: 1024,
-		SourceType:      "unknown",
-		Source:          "0",
+		SourceType:         "unknown",
+		Source:             "0",
 	}
 }
 
@@ -299,16 +312,22 @@ func (c *CameraConfig) ValidateUpdate(key string, value any) (bool, any) {
 	case "main_fps", "sub_fps":
 		v, err := toInt(value)
 		return err == nil && v >= MinFPS && v <= MaxFPS, v
+	case "main_keyframe_interval", "sub_keyframe_interval":
+		v, err := toInt(value)
+		return err == nil && v >= 0, v
 	case "main_bitrate", "sub_bitrate":
 		v := strings.TrimSpace(fmt.Sprint(value))
 		return bitrateRE.MatchString(v), v
+	case "main_options", "sub_options":
+		v := fmt.Sprint(value)
+		return true, v
 	case "hw_accel":
 		v := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
 		return ValidHwAccel[v], v
 	case "timestamp_position":
 		v := strings.TrimSpace(fmt.Sprint(value))
 		return ValidTimestampPositions[v], v
-	case "show_timestamp", "flip", "mirror", "recording_enabled":
+	case "show_timestamp", "flip", "mirror", "recording_enabled", "bypass":
 		return CoerceBool(value)
 	case "rotation":
 		v, err := toInt(value)
@@ -365,6 +384,10 @@ func applyField(c *CameraConfig, key string, value any) bool {
 		return c.setInt(&c.MainFPS, value)
 	case "main_bitrate":
 		return c.setStr(&c.MainBitrate, value)
+	case "main_keyframe_interval":
+		return c.setInt(&c.MainKeyframeInterval, value)
+	case "main_options":
+		return c.setStr(&c.MainOptions, value)
 	case "main_stream_name":
 		return c.setStr(&c.MainStreamName, value)
 	case "sub_width":
@@ -375,6 +398,10 @@ func applyField(c *CameraConfig, key string, value any) bool {
 		return c.setInt(&c.SubFPS, value)
 	case "sub_bitrate":
 		return c.setStr(&c.SubBitrate, value)
+	case "sub_keyframe_interval":
+		return c.setInt(&c.SubKeyframeInterval, value)
+	case "sub_options":
+		return c.setStr(&c.SubOptions, value)
 	case "sub_stream_name":
 		return c.setStr(&c.SubStreamName, value)
 	case "hw_accel":
@@ -399,6 +426,8 @@ func applyField(c *CameraConfig, key string, value any) bool {
 		return c.setInt(&c.Rotation, value)
 	case "recording_enabled":
 		return c.setBool(&c.RecordingEnabled, value)
+	case "bypass":
+		return c.setBool(&c.Bypass, value)
 	case "recording_format":
 		return c.setStr(&c.RecordingFormat, value)
 	case "recording_max_file_mb":

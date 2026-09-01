@@ -975,7 +975,7 @@ function uploadVideoFile(file) {
     
     // Create form data
     const formData = new FormData();
-    formData.append('video', file, file.name);
+    formData.append('file', file, file.name);
     
     // Create XHR for progress tracking
     const xhr = new XMLHttpRequest();

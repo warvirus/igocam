@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -21,23 +22,27 @@ import (
 type HWAccel string
 
 const (
-	HWAuto  HWAccel = "auto"
-	HWNVENC HWAccel = "nvenc"
-	HWQSV   HWAccel = "qsv"
-	HWCPU   HWAccel = "cpu"
+	HWAuto         HWAccel = "auto"
+	HWNVENC        HWAccel = "nvenc"
+	HWQSV          HWAccel = "qsv"
+	HWVideoToolbox HWAccel = "videotoolbox"
+	HWCPU          HWAccel = "cpu"
 )
 
 // Config 스트림 설정.
 type Config struct {
-	Width            int
-	Height           int
-	FPS              int
-	Bitrate          string
-	KeyframeInterval int // 기본값 = fps (1초)
-	HWAccel          HWAccel
-	SubWidth         int
-	SubHeight        int
-	SubBitrate       string
+	Width               int
+	Height              int
+	FPS                 int
+	Bitrate             string
+	KeyframeInterval    int // 기본값 = fps (1초)
+	HWAccel             HWAccel
+	MainOptions         string // 메인 스트림용 추가 ffmpeg 옵션 (공백 구분)
+	SubWidth            int
+	SubHeight           int
+	SubBitrate          string
+	SubKeyframeInterval int    // 0이면 FPS(1초) 사용
+	SubOptions          string // 서브 스트림용 추가 ffmpeg 옵션 (공백 구분)
 }
 
 // Stats 슬라이딩 윈도우 FPS 포함 통계.
@@ -109,19 +114,19 @@ type Streamer struct {
 	Config *Config
 	Stats  *Stats
 
-	mu           sync.Mutex
-	ffmpeg       *exec.Cmd
-	stdin        *os.File
-	stderrBuf    []byte
-	activeHW     HWAccel
-	rtmpURL      string
-	rtmpURLSub   string
-	isRunning    bool
+	mu            sync.Mutex
+	ffmpeg        *exec.Cmd
+	stdin         *os.File
+	stderrBuf     []byte
+	activeHW      HWAccel
+	rtmpURL       string
+	rtmpURLSub    string
+	isRunning     bool
 	writerRunning bool
-	shutdown     chan struct{}
-	frameQueue   *frame.Queue
-	writerDone   chan struct{}
-	reconnectCnt int
+	shutdown      chan struct{}
+	frameQueue    *frame.Queue
+	writerDone    chan struct{}
+	reconnectCnt  int
 }
 
 // New 스트리머 생성.
@@ -155,6 +160,9 @@ func New(cfg *Config) *Streamer {
 	}
 	if cfg.SubHeight <= 0 {
 		cfg.SubHeight = 360
+	}
+	if cfg.SubKeyframeInterval <= 0 {
+		cfg.SubKeyframeInterval = cfg.FPS
 	}
 	return &Streamer{
 		Config:   cfg,
@@ -194,11 +202,16 @@ func (s *Streamer) Start(rtmpURL, rtmpURLSub string) bool {
 	s.shutdown = make(chan struct{})
 	s.mu.Unlock()
 
-	// HW 사다리: AUTO -> NVENC -> QSV -> CPU. 특정 HW 요청이면 CPU last-resort.
+	// HW 사다리: AUTO -> NVENC -> QSV -> VideoToolbox(macOS) -> CPU.
+	// 특정 HW 요청이면 CPU last-resort.
 	hwOrder := []HWAccel{}
 	switch s.Config.HWAccel {
 	case HWAuto:
-		hwOrder = []HWAccel{HWNVENC, HWQSV, HWCPU}
+		hwOrder = []HWAccel{HWNVENC, HWQSV}
+		if runtime.GOOS == "darwin" {
+			hwOrder = append(hwOrder, HWVideoToolbox)
+		}
+		hwOrder = append(hwOrder, HWCPU)
 	case HWCPU:
 		hwOrder = []HWAccel{HWCPU}
 	default:
@@ -439,7 +452,7 @@ func checkHWEncoderAvailable(hw HWAccel) bool {
 	if hw == HWCPU {
 		return true
 	}
-	encoder := map[HWAccel]string{HWNVENC: "h264_nvenc", HWQSV: "h264_qsv"}[hw]
+	encoder := map[HWAccel]string{HWNVENC: "h264_nvenc", HWQSV: "h264_qsv", HWVideoToolbox: "h264_videotoolbox"}[hw]
 	if encoder == "" {
 		return true
 	}
@@ -457,9 +470,10 @@ func (s *Streamer) startFFmpeg(rtmpURL, rtmpURLSub string, hw HWAccel) bool {
 		codec       string
 		extraEncode []string
 	}{
-		HWNVENC: {"h264_nvenc", []string{"-gpu", "0", "-preset", "p1", "-rc", "cbr", "-bf", "0"}},
-		HWQSV:   {"h264_qsv", []string{"-preset", "faster", "-global_quality", "20", "-look_ahead", "0", "-bf", "0"}},
-		HWCPU:   {"libx264", []string{"-preset", "faster", "-crf", "20", "-tune", "zerolatency", "-bf", "0"}},
+		HWNVENC:        {"h264_nvenc", []string{"-gpu", "0", "-preset", "p1", "-rc", "cbr", "-bf", "0"}},
+		HWQSV:          {"h264_qsv", []string{"-preset", "faster", "-global_quality", "20", "-look_ahead", "0", "-bf", "0"}},
+		HWVideoToolbox: {"h264_videotoolbox", []string{"-realtime", "1", "-allow_sw", "1"}},
+		HWCPU:          {"libx264", []string{"-preset", "faster", "-crf", "20", "-tune", "zerolatency", "-bf", "0"}},
 	}
 	cfg := hwConfigs[hw]
 
@@ -486,6 +500,8 @@ func (s *Streamer) startFFmpeg(rtmpURL, rtmpURLSub string, hw HWAccel) bool {
 		"-fps_mode", "cfr",
 		"-r", fmt.Sprint(s.Config.FPS),
 	)
+	// 메인 스트림 추가 옵션 (공백 구분).
+	cmdArgs = append(cmdArgs, splitOptions(s.Config.MainOptions)...)
 
 	if strings.HasPrefix(rtmpURL, "rtsp://") {
 		cmdArgs = append(cmdArgs, "-f", "rtsp", "-rtsp_transport", "tcp", rtmpURL)
@@ -500,8 +516,12 @@ func (s *Streamer) startFFmpeg(rtmpURL, rtmpURLSub string, hw HWAccel) bool {
 		cmdArgs = append(cmdArgs,
 			"-s", fmt.Sprintf("%dx%d", s.Config.SubWidth, s.Config.SubHeight),
 			"-b:v", s.Config.SubBitrate,
-			"-g", fmt.Sprint(s.Config.KeyframeInterval),
+			"-maxrate", s.Config.SubBitrate,
+			"-bufsize", "1M",
+			"-g", fmt.Sprint(s.Config.SubKeyframeInterval),
 		)
+		// 서브 스트림 추가 옵션 (공백 구분).
+		cmdArgs = append(cmdArgs, splitOptions(s.Config.SubOptions)...)
 		if strings.HasPrefix(rtmpURLSub, "rtsp://") {
 			cmdArgs = append(cmdArgs, "-f", "rtsp", "-rtsp_transport", "tcp", rtmpURLSub)
 		} else {
@@ -666,6 +686,16 @@ func procAlive(proc *exec.Cmd) bool {
 	}
 	err := proc.Process.Signal(syscall.Signal(0))
 	return err == nil
+}
+
+// splitOptions 공백으로 구분된 ffmpeg 옵션 문자열을 인자 조각으로 분할한다.
+// exec.Command는 셸을 거치지 않으므로, 공백으로 나누는 것만으로 안전하다.
+// 연속 공백, 앞뒤 공백은 무시한다.
+func splitOptions(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	return strings.Fields(raw)
 }
 
 // fmtProgress 로그 출력 헬퍼 (streamer는 별도 logger 없이 stderr로 출력).

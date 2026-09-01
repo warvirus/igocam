@@ -34,25 +34,24 @@ type Client struct {
 	// Write는 클라이언트 소켓에 인코딩된 multipart 청크를 쓴다 (HTTP 스레드).
 	Write func([]byte) error
 
-	mu          sync.Mutex
-	connected   atomic.Bool
-	framesSent  atomic.Int64
-	queue       *frame.Queue
-	stream      string // 'main' 또는 'sub'
-	parent      *Streamer
+	mu         sync.Mutex
+	connected  atomic.Bool
+	framesSent atomic.Int64
+	queue      *frame.Queue
+	stream     string // 'main' 또는 'sub'
+	parent     *Streamer
 }
 
 // Streamer MJPEG 스트리머. 인코더 워커가 프레임을 1회 인코딩해 각 클라이언트
 // 큐로 팬아웃한다.
 type Streamer struct {
-	quality   int
-	subW      int
-	subH      int
+	quality     int
+	subW        int
+	subH        int
 	useFixedSub bool
 
-	mu        sync.Mutex
-	clients   map[*Client]bool
-	lastFrame atomic.Pointer[[]byte]
+	mu      sync.Mutex
+	clients map[*Client]bool
 
 	frameQueue *frame.Queue
 	workerStop chan struct{}
@@ -282,7 +281,6 @@ func (s *Streamer) encodeLoop() {
 		jpeg := make([]byte, buf.Len())
 		copy(jpeg, buf.GetBytes())
 		buf.Close()
-		s.lastFrame.Store(&jpeg)
 		mainData := s.wrapMultipart(jpeg)
 
 		s.mu.Lock()

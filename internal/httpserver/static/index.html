@@ -193,6 +193,16 @@
                             <input type="text" id="stream_main_bitrate" placeholder="8M">
                         </div>
                     </div>
+                    <div class="inline">
+                        <div class="form-group">
+                            <label>Keyframe Interval</label>
+                            <input type="number" id="stream_main_keyframe_interval" min="0" placeholder="0 = auto">
+                        </div>
+                        <div class="form-group">
+                            <label>Options</label>
+                            <input type="text" id="stream_main_options" placeholder="-preset fast -profile:v high">
+                        </div>
+                    </div>
                     <div class="form-group">
                         <label>Stream Name</label>
                         <input type="text" id="stream_main_stream_name">
@@ -219,6 +229,16 @@
                             <input type="text" id="stream_sub_bitrate" placeholder="1M">
                         </div>
                     </div>
+                    <div class="inline">
+                        <div class="form-group">
+                            <label>Keyframe Interval</label>
+                            <input type="number" id="stream_sub_keyframe_interval" min="0" placeholder="0 = auto">
+                        </div>
+                        <div class="form-group">
+                            <label>Options</label>
+                            <input type="text" id="stream_sub_options" placeholder="-preset fast -profile:v high">
+                        </div>
+                    </div>
                     <div class="form-group">
                         <label>Stream Name</label>
                         <input type="text" id="stream_sub_stream_name">
@@ -231,8 +251,15 @@
                             <option value="auto">Auto</option>
                             <option value="nvenc">NVENC (NVIDIA)</option>
                             <option value="qsv">QSV (Intel)</option>
+                            <option value="videotoolbox">VideoToolbox (Apple)</option>
                             <option value="cpu">CPU</option>
                         </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="stream_bypass">
+                            Bypass (직접 전송, 트랜스코딩 없음)
+                        </label>
                     </div>
 
                     <h3>Ports <span class="readonly-tag">read-only</span></h3>

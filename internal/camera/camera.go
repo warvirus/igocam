@@ -50,11 +50,11 @@ type Camera struct {
 	// HTTP 서버 인터페이스 (실제 서버는 외부에서 주입).
 	HTTPServer HTTPServer
 
-	mu              sync.Mutex
-	running         atomic.Bool
-	restarting      atomic.Bool
+	mu               sync.Mutex
+	running          atomic.Bool
+	restarting       atomic.Bool
 	useMjpegFallback atomic.Bool
-	streamingMode   atomic.Value // StreamingMode
+	streamingMode    atomic.Value // StreamingMode
 
 	// 프레임 파이프라인 상태
 	streamStartTime time.Time
@@ -66,7 +66,7 @@ type Camera struct {
 	lastFrameLock sync.Mutex
 
 	// 비디오 업로드 모드
-	videoUploadMode atomic.Bool
+	videoUploadMode  atomic.Bool
 	currentVideoPath atomic.Pointer[string]
 	videoError       atomic.Pointer[string]
 }
@@ -82,20 +82,24 @@ type HTTPServer interface {
 func New(cfg *config.CameraConfig) *Camera {
 	ptzCtrl := ptz.New(cfg.MainWidth, cfg.MainHeight, 4.0, "ptz_presets.json")
 	c := &Camera{
-		Config: cfg,
-		PTZ:    ptzCtrl,
-		MJPEG:  mjpeg.New(80, cfg.SubWidth, cfg.SubHeight),
+		Config:   cfg,
+		PTZ:      ptzCtrl,
+		MJPEG:    mjpeg.New(80, cfg.SubWidth, cfg.SubHeight),
 		Recorder: recorder.New(cfg),
-		Onvif: onvif.New(cfg, ptzCtrl),
+		Onvif:    onvif.New(cfg, ptzCtrl),
 		Streamer: streamer.New(&streamer.Config{
-			Width:    cfg.MainWidth,
-			Height:   cfg.MainHeight,
-			FPS:      cfg.MainFPS,
-			Bitrate:  cfg.MainBitrate,
-			HWAccel:  streamer.HWAccel(cfg.HWAccel),
-			SubWidth: cfg.SubWidth,
-			SubHeight: cfg.SubHeight,
-			SubBitrate: cfg.SubBitrate,
+			Width:               cfg.MainWidth,
+			Height:              cfg.MainHeight,
+			FPS:                 cfg.MainFPS,
+			Bitrate:             cfg.MainBitrate,
+			KeyframeInterval:    cfg.MainKeyframeInterval,
+			HWAccel:             streamer.HWAccel(cfg.HWAccel),
+			MainOptions:         cfg.MainOptions,
+			SubWidth:            cfg.SubWidth,
+			SubHeight:           cfg.SubHeight,
+			SubBitrate:          cfg.SubBitrate,
+			SubKeyframeInterval: cfg.SubKeyframeInterval,
+			SubOptions:          cfg.SubOptions,
 		}),
 	}
 	c.streamingMode.Store(StreamingMode(ModeGo2rtc))
@@ -121,14 +125,21 @@ func (c *Camera) Start(discovery bool) bool {
 	}
 	// go2rtc가 준비됐으면 streamer 시작.
 	if c.GoStream != nil && c.GoStream.Running() {
-		mainURL := fmt.Sprintf("rtmp://127.0.0.1:%d/%s", c.Config.RTMPPort, c.Config.MainStreamName)
-		subURL := fmt.Sprintf("rtmp://127.0.0.1:%d/%s", c.Config.RTMPPort, c.Config.SubStreamName)
-		if c.Streamer.Start(mainURL, subURL) {
+		if c.Config.Bypass {
+			// bypass: go2rtc가 소스를 직접 읽어 트랜스코딩 없이 전송하므로
+			// 로컬 ffmpeg 인코딩 스트리머는 시작하지 않는다.
 			c.useMjpegFallback.Store(false)
 			c.streamingMode.Store(StreamingMode(ModeGo2rtc))
 		} else {
-			c.useMjpegFallback.Store(true)
-			c.streamingMode.Store(StreamingMode(ModeMJPEG))
+			mainURL := fmt.Sprintf("rtmp://127.0.0.1:%d/%s", c.Config.RTMPPort, c.Config.MainStreamName)
+			subURL := fmt.Sprintf("rtmp://127.0.0.1:%d/%s", c.Config.RTMPPort, c.Config.SubStreamName)
+			if c.Streamer.Start(mainURL, subURL) {
+				c.useMjpegFallback.Store(false)
+				c.streamingMode.Store(StreamingMode(ModeGo2rtc))
+			} else {
+				c.useMjpegFallback.Store(true)
+				c.streamingMode.Store(StreamingMode(ModeMJPEG))
+			}
 		}
 	} else {
 		c.useMjpegFallback.Store(true)
@@ -242,7 +253,8 @@ func (c *Camera) Stream(src *gocv.Mat) {
 	}
 
 	// 8. go2rtc 팬아웃 (streamer writer 스레드가 리사이즈/인코딩).
-	if !c.useMjpegFallback.Load() && c.Streamer != nil {
+	// bypass 모드에서는 go2rtc가 소스를 직접 읽으므로 로컬 인코딩 생략.
+	if !c.Config.Bypass && !c.useMjpegFallback.Load() && c.Streamer != nil {
 		f.Retain()
 		c.Streamer.Stream(f)
 	}

@@ -70,18 +70,46 @@ func (m *Manager) Start() bool {
 			}
 		}
 
+		// bypass는 파일/RTSP 소스에서만 의미가 있다. 카메라 디바이스/업로드 모드는
+		// go2rtc가 직접 읽을 수 없으므로 일반 인코딩으로 강제한다.
+		bypass := cfg.Bypass
+		if bypass {
+			switch srcType {
+			case capture.SourceVideoFile, capture.SourceRTSP:
+				// OK: go2rtc가 소스를 직접 읽어 트랜스코딩 없이 전송한다.
+			default:
+				fmt.Printf("[WARN] Camera '%s': bypass는 파일/RTSP 소스에만 적용됩니다 (현재 %s). 일반 인코딩으로 진행합니다.\n",
+					cfg.Name, srcType)
+				bypass = false
+			}
+		}
+		cfg.Bypass = bypass
+
 		cam := camera.New(cfg)
 
 		// go2rtc 인스턴스 생성 + 시작 (카메라별 포트).
 		go2rtcPath := filepath.Join("data", fmt.Sprintf("go2rtc_%s.yaml", cfg.Name))
-		if err := gostream.WriteGo2rtcConfig(go2rtcPath, gostream.CameraStream{
-			MainStream:  cfg.MainStreamName,
-			SubStream:   cfg.SubStreamName,
-			APIPort:     cfg.Go2rtcAPIPort,
-			RTSPPort:    cfg.RTSPPort,
-			RTMPPort:    cfg.RTMPPort,
-			WebRTCPort:  cfg.WebRTCPort,
-		}); err != nil {
+		cs := gostream.CameraStream{
+			MainStream: cfg.MainStreamName,
+			SubStream:  cfg.SubStreamName,
+			APIPort:    cfg.Go2rtcAPIPort,
+			RTSPPort:   cfg.RTSPPort,
+			RTMPPort:   cfg.RTMPPort,
+			WebRTCPort: cfg.WebRTCPort,
+		}
+		if bypass {
+			// go2rtc가 소스를 직접 읽어 트랜스코딩 없이 전송한다.
+			// - 파일 소스: go2rtc는 로컬 파일 경로를 직접 지원하지 않으므로
+			//   `ffmpeg:` 스킴으로 스트림 복사(copy, 재인코딩 없음)를 사용한다.
+			// - RTSP/HTTP URL: go2rtc가 네이티브로 읽는다.
+			switch srcType {
+			case capture.SourceVideoFile:
+				cs.Source = "ffmpeg:" + cfg.Source
+			default:
+				cs.Source = cfg.Source
+			}
+		}
+		if err := gostream.WriteGo2rtcConfig(go2rtcPath, cs); err != nil {
 			m.stopAll()
 			return false
 		}
@@ -210,12 +238,34 @@ func (m *Manager) captureLoop(cam *camera.Camera) {
 	// 캡처 루프 자체는 페이싱하지 않는다. 페이싱은 camera.Stream 내부의
 	// paceFrame()이 담당하며, Start()에서 MainFPS를 소스 FPS로 설정했으므로
 	// 비디오 파일/RTSP는 원본 속도, 카메라 등은 main_fps로 실시간 재생된다.
+	origSource := absPath(source)
 	for cam.IsRunning() {
 		select {
 		case <-m.stopCh:
 			return
 		default:
 		}
+
+		// 파일 소스: 새 파일이 업로드되면 (GetCurrentVideoPath가 원본과 달라지면)
+		// 업로드된 파일로 재오픈해 전환한다.
+		if srcType == capture.SourceVideoFile {
+			currentPath := cam.GetCurrentVideoPath()
+			if currentPath != "" && currentPath != origSource {
+				src.Close()
+				source = currentPath
+				origSource = currentPath
+				newSrc, err := capture.NewVideoFileSource(source)
+				if err != nil {
+					cam.NotifyVideoError(fmt.Sprintf("Could not open video: %s", filepath.Base(source)))
+					time.Sleep(500 * time.Millisecond)
+					continue
+				}
+				src = newSrc
+				cam.Config.SourceInfo = filepath.Base(source)
+				cam.NotifyVideoLoaded(source)
+			}
+		}
+
 		img, ok := src.Read()
 		if !ok {
 			img.Close()
