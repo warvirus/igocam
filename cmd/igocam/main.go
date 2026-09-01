@@ -42,6 +42,7 @@ func main() {
 
 	mgr := manager.New(configs)
 	mgr.SetGo2rtcBin(go2rtcBin)
+	mgr.SetAdminPort(adminPort)
 
 	if !mgr.Start() {
 		fmt.Fprintln(os.Stderr, "Failed to start cameras")

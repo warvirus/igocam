@@ -37,6 +37,8 @@ type Server struct {
 	config *config.CameraConfig
 	http   *http.Server
 	listen string
+
+	adminPort int // 관리 서버 포트 (Web UI "ADMIN" 링크용).
 }
 
 // New HTTP 서버 생성.
@@ -45,6 +47,11 @@ func New(cam *camera.Camera) *Server {
 		camera: cam,
 		config: cam.Config,
 	}
+}
+
+// SetAdminPort 관리 서버 포트 설정.
+func (s *Server) SetAdminPort(port int) {
+	s.adminPort = port
 }
 
 // Start 서버 시작.
@@ -173,6 +180,10 @@ func (s *Server) renderWebUI() string {
 		"{{source_type_label}}": "Unknown Source",
 		"{{source_info}}":       s.config.SourceInfo,
 		"{{version}}":           config.Version,
+		"{{local_ip}}":          ip,
+		"{{model}}":             s.config.Model,
+		"{{onvif_port}}":        fmt.Sprintf("%d", s.config.OnvifPort),
+		"{{admin_port}}":        fmt.Sprintf("%d", s.adminPort),
 	}
 	html := webUIHTML
 	for k, v := range repl {

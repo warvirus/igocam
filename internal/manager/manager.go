@@ -32,6 +32,9 @@ type Manager struct {
 
 	// go2rtc 바이너리 경로 (빈 값이면 PATH).
 	go2rtcBin string
+
+	// adminPort 관리 서버 포트 (per-camera Web UI의 "관리자로 돌아가기" 링크용).
+	adminPort int
 }
 
 // New 매니저 생성.
@@ -40,6 +43,11 @@ func New(configs []*config.CameraConfig) *Manager {
 		configs: configs,
 		stopCh:  make(chan struct{}),
 	}
+}
+
+// SetAdminPort 관리 서버 포트 설정.
+func (m *Manager) SetAdminPort(port int) {
+	m.adminPort = port
 }
 
 // SetGo2rtcBin go2rtc 바이너리 경로 설정.
@@ -130,6 +138,7 @@ func (m *Manager) Start() bool {
 
 		// HTTP 서버 주입.
 		srv := httpserver.New(cam)
+		srv.SetAdminPort(m.adminPort)
 		cam.SetHTTPServer(srv)
 
 		if !cam.Start(false) {
@@ -278,6 +287,7 @@ func (m *Manager) startCamera(cfg *config.CameraConfig) (*camera.Camera, error) 
 	cam.SetGoStream(goStream)
 
 	srv := httpserver.New(cam)
+	srv.SetAdminPort(m.adminPort)
 	cam.SetHTTPServer(srv)
 
 	if !cam.Start(false) {
