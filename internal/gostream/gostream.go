@@ -187,7 +187,8 @@ func WriteGo2rtcConfig(path string, cam CameraStream) error {
 	sb.WriteString(fmt.Sprintf("rtsp:\n  listen: \":%d\"\n", cam.RTSPPort))
 	sb.WriteString(fmt.Sprintf("rtmp:\n  listen: \":%d\"\n", cam.RTMPPort))
 	sb.WriteString(fmt.Sprintf("webrtc:\n  listen: \":%d\"\n", cam.WebRTCPort))
-	sb.WriteString("  candidates:\n    - host.docker.internal:8555\n")
+	// candidates 미지정 → go2rtc가 로컬 인터페이스 IP를 자동 수집해 후보로 등록한다.
+	// (host.docker.internal 같은 하드코딩은 네이티브 실행에서 WebRTC 연결을 깨뜨려 제거)
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

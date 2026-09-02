@@ -45,11 +45,13 @@ func TestWriteGo2rtcConfig(t *testing.T) {
 		"listen: \":8554\"",
 		"listen: \":1935\"",
 		"listen: \":8555\"",
-		"host.docker.internal",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("config missing %q:\n%s", want, content)
 		}
+	}
+	if strings.Contains(content, "candidates") {
+		t.Fatalf("config must not hardcode WebRTC candidates:\n%s", content)
 	}
 }
 
