@@ -179,6 +179,12 @@ func WriteGo2rtcConfig(path string, cam CameraStream) error {
 	if cam.Source != "" {
 		sb.WriteString(fmt.Sprintf("  %s: %s\n", cam.MainStream, cam.Source))
 		sb.WriteString(fmt.Sprintf("  %s: %s\n", cam.SubStream, cam.MainStream))
+		// ffmpeg: 파일 소스는 `#input=loop` 쿼리로 이 템플릿을 참조해
+		// -stream_loop로 무한 반복 재생한다. 템플릿이 없으면 파일 끝에서
+		// producer가 죽고 go2rtc는 재시작하지 않아 스트림이 영구 중단된다.
+		if strings.Contains(cam.Source, "ffmpeg:") {
+			sb.WriteString("\nffmpeg:\n  loop: \"-stream_loop -1 -re -i {input}\"\n")
+		}
 	} else {
 		sb.WriteString(fmt.Sprintf("  %s: null\n", cam.MainStream))
 		sb.WriteString(fmt.Sprintf("  %s: null\n", cam.SubStream))

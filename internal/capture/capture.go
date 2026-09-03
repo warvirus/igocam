@@ -104,6 +104,24 @@ func ProbeFPS(path string) float64 {
 	defer src.Close()
 	return src.FPS()
 }
+
+// ProbeCodec 비디오 파일의 비디오 코덱 FourCC(예: "avc1", "AV01")를 반환한다. 실패 시 "" 반환.
+func ProbeCodec(path string) string {
+	cap, err := gocv.VideoCaptureFile(path)
+	if err != nil {
+		return ""
+	}
+	defer cap.Close()
+	if !cap.IsOpened() {
+		return ""
+	}
+	f := uint32(cap.Get(gocv.VideoCaptureFOURCC))
+	if f == 0 {
+		return ""
+	}
+	return string([]byte{byte(f), byte(f >> 8), byte(f >> 16), byte(f >> 24)})
+}
+
 // NewCameraSource opens a camera device by index with platform-optimized backend.
 func NewCameraSource(index int) (FrameSource, error) {
 	backends := []gocv.VideoCaptureAPI{}

@@ -60,6 +60,25 @@ func (m *Manager) Cameras() []*camera.Camera {
 	return m.cameras
 }
 
+// bypassSource bypass 모드에서 go2rtc가 직접 읽을 소스 URL을 구성한다.
+//   - 파일 소스: go2rtc는 로컬 파일을 직접 지원하지 않으므로 `ffmpeg:` 스킴을 쓴다.
+//     `#input=loop` 쿼리로 -stream_loop 무한 반복을 활성화한다 (파일 끝에서
+//     producer가 죽어도 go2rtc는 재시작하지 않으므로 루프가 필수다).
+//   - 코덱이 H264가 아니면 (예: AV1) RTSP 전송이 불가하므로 `#video=h264`로
+//     go2rtc 쪽에서 재인코딩한다.
+//   - RTSP/HTTP URL: go2rtc가 네이티브로 읽는다.
+func bypassSource(cfg *config.CameraConfig) string {
+	srcType, _ := capture.InferSourceType(cfg.Source)
+	if srcType != capture.SourceVideoFile {
+		return cfg.Source
+	}
+	query := "#input=loop"
+	if codec := capture.ProbeCodec(cfg.Source); codec != "" && codec != "h264" && codec != "avc1" {
+		query += "#video=h264"
+	}
+	return "ffmpeg:" + cfg.Source + query
+}
+
 // Start 모든 카메라, 공유 discovery, 캡처 스레드를 시작한다.
 // 어떤 카메라든 시작 실패 시 이미 시작된 것들을 모두 정지하고 false 반환.
 func (m *Manager) Start() bool {
@@ -107,15 +126,7 @@ func (m *Manager) Start() bool {
 		}
 		if bypass {
 			// go2rtc가 소스를 직접 읽어 트랜스코딩 없이 전송한다.
-			// - 파일 소스: go2rtc는 로컬 파일 경로를 직접 지원하지 않으므로
-			//   `ffmpeg:` 스킴으로 스트림 복사(copy, 재인코딩 없음)를 사용한다.
-			// - RTSP/HTTP URL: go2rtc가 네이티브로 읽는다.
-			switch srcType {
-			case capture.SourceVideoFile:
-				cs.Source = "ffmpeg:" + cfg.Source
-			default:
-				cs.Source = cfg.Source
-			}
+			cs.Source = bypassSource(cfg)
 		}
 		if err := gostream.WriteGo2rtcConfig(go2rtcPath, cs); err != nil {
 			m.stopAll()
@@ -270,13 +281,7 @@ func (m *Manager) startCamera(cfg *config.CameraConfig) (*camera.Camera, error) 
 		WebRTCPort: cfg.WebRTCPort,
 	}
 	if cfg.Bypass {
-		srcType, _ := capture.InferSourceType(cfg.Source)
-		switch srcType {
-		case capture.SourceVideoFile:
-			cs.Source = "ffmpeg:" + cfg.Source
-		default:
-			cs.Source = cfg.Source
-		}
+		cs.Source = bypassSource(cfg)
 	}
 	if err := gostream.WriteGo2rtcConfig(go2rtcPath, cs); err != nil {
 		return nil, fmt.Errorf("write go2rtc config: %w", err)
