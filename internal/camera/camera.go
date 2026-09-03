@@ -193,6 +193,22 @@ func (c *Camera) UsingMJPEGFallback() bool {
 	return c.useMjpegFallback.Load()
 }
 
+// IdleBypass bypass 모드에서 로컬 소비자(MJPEG 클라이언트/레코더)가 없어
+// 로컬 프레임 파이프라인이 불필요한 상태인지 여부.
+// 이 경우 go2rtc가 소스를 직접 읽어 전송하므로 로컬 캡처/인코딩을 낮출 수 있다.
+func (c *Camera) IdleBypass() bool {
+	if !c.Config.Bypass {
+		return false
+	}
+	if c.MJPEG != nil && c.MJPEG.ClientCount() > 0 {
+		return false
+	}
+	if c.Recorder != nil && c.Recorder.WantsFrames() {
+		return false
+	}
+	return true
+}
+
 // Stream 프레임을 파이프라인에 제출한다.
 // 순서: PTZ → display transforms → timestamp → outbound 클론 → 팬아웃.
 //
@@ -201,6 +217,20 @@ func (c *Camera) UsingMJPEGFallback() bool {
 // 저장해도 복사할 필요가 없다.
 func (c *Camera) Stream(src *gocv.Mat) {
 	if !c.running.Load() {
+		return
+	}
+
+	// bypass 모드에서 로컬 소비자(MJPEG 클라이언트/레코더)가 없으면
+	// 무거운 파이프라인(PTZ/변환/타임스탬프/클론/팬아웃)을 건너뛰고
+	// 스냅샷만 갱신한다. go2rtc가 소스를 직접 읽어 전송하므로 로컬 처리가 불필요하다.
+	if c.IdleBypass() {
+		c.lastFrameLock.Lock()
+		if c.lastFrame != nil {
+			c.lastFrame.Close()
+		}
+		snap := src.Clone()
+		c.lastFrame = &snap
+		c.lastFrameLock.Unlock()
 		return
 	}
 

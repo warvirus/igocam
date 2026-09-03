@@ -402,6 +402,63 @@ func (m *Manager) RestartCamera(id string) error {
 	return err
 }
 
+// configByID ID로 config 조회.
+func (m *Manager) configByID(id string) *config.CameraConfig {
+	for _, cfg := range m.configs {
+		if cfg.ID == id {
+			return cfg
+		}
+	}
+	return nil
+}
+
+// syncConfigsFromDisk 디스크에서 읽은 config 배열로 m.configs를 동기화한다.
+// 실행 중인 카메라/HTTPServer가 공유하는 config 포인터를 유지하기 위해
+// 기존 config는 in-place로 갱신하고, 디스크에 없는 항목은 제거한다.
+func (m *Manager) syncConfigsFromDisk(diskConfigs []*config.CameraConfig) {
+	idxByID := map[string]int{}
+	for i, cfg := range m.configs {
+		idxByID[cfg.ID] = i
+	}
+	next := make([]*config.CameraConfig, 0, len(diskConfigs))
+	for _, dc := range diskConfigs {
+		if idx, ok := idxByID[dc.ID]; ok {
+			*m.configs[idx] = *dc
+			next = append(next, m.configs[idx])
+		} else {
+			next = append(next, dc)
+		}
+	}
+	m.configs = next
+}
+
+// restartCamera 실행 중인 카메라를 m.configs의 (갱신된) 설정으로 재시작한다.
+func (m *Manager) restartCamera(id string) error {
+	cfg := m.configByID(id)
+	if cfg == nil {
+		return fmt.Errorf("camera config not found: %s", id)
+	}
+	// 기존 카메라 정지 및 목록에서 제거.
+	for i, cam := range m.cameras {
+		if cam.Config.ID == id {
+			cam.Stop()
+			if cam.GoStream != nil {
+				cam.GoStream.Stop()
+			}
+			m.cameras = append(m.cameras[:i], m.cameras[i+1:]...)
+			break
+		}
+	}
+	// 새 설정으로 시작.
+	cam, err := m.startCamera(cfg)
+	if err != nil {
+		return err
+	}
+	m.cameras = append(m.cameras, cam)
+	fmt.Printf("  [OK] Camera '%s' restarted\n", cfg.Name)
+	return nil
+}
+
 // ReloadFromConfig 디스크 config 파일을 다시 읽어 실행 중인 상태와 동기화한다.
 // 수동으로 JSON을 편집한 변경사항을 반영한다.
 func (m *Manager) ReloadFromConfig() (added, updated, removed []string, err error) {
@@ -418,25 +475,18 @@ func (m *Manager) ReloadFromConfig() (added, updated, removed []string, err erro
 	}
 
 	// 현재 실행 중인 ID 맵.
-	running := map[string]int{} // id → camera index
-	for i, cam := range m.cameras {
-		running[cam.Config.ID] = i
+	running := map[string]bool{}
+	for _, cam := range m.cameras {
+		running[cam.Config.ID] = true
 	}
 
-	// 디스크에 있지만 실행 중에 없는 것 → 추가.
+	// 디스크에 있는 ID 집합.
 	diskIDs := map[string]bool{}
 	for _, dc := range diskConfigs {
 		diskIDs[dc.ID] = true
-		if _, exists := running[dc.ID]; !exists {
-			if _, err := m.AddCamera(dc); err != nil {
-				fmt.Printf("[WARN] Reload: add camera '%s' failed: %v\n", dc.Name, err)
-				continue
-			}
-			added = append(added, dc.Name)
-		}
 	}
 
-	// 실행 중에 있지만 디스크에 없는 것 → 제거.
+	// 실행 중이지만 디스크에 없는 것 → 제거.
 	// 주의: m.cameras를 순회하면서 RemoveCamera로 동시 수정하면 슬라이스가
 	// 깨지므로 사본을 만들어 안전하게 순회한다.
 	for _, cam := range append([]*camera.Camera(nil), m.cameras...) {
@@ -449,16 +499,65 @@ func (m *Manager) ReloadFromConfig() (added, updated, removed []string, err erro
 		}
 	}
 
-	// 추가/제거 후 나머지에 대해 RestartStream으로 변경 반영.
-	// (실제 diff 검증은 추후 고도화)
+	// 디스크 값을 메모리 config에 반영 (기존 포인터는 in-place 갱신).
+	m.syncConfigsFromDisk(diskConfigs)
+
+	// 디스크에 있지만 실행 중이 아닌 것 → 시작.
+	for _, dc := range diskConfigs {
+		if running[dc.ID] {
+			continue
+		}
+		cfg := m.configByID(dc.ID)
+		if cfg == nil {
+			continue
+		}
+		if cfg.OnvifPort == 0 {
+			ps := m.FindAvailablePorts()
+			ps.applyToConfig(cfg)
+		}
+		cam, err := m.startCamera(cfg)
+		if err != nil {
+			fmt.Printf("[WARN] Reload: add camera '%s' failed: %v\n", cfg.Name, err)
+			continue
+		}
+		m.cameras = append(m.cameras, cam)
+		added = append(added, cfg.Name)
+	}
+
+	// 디스크에 있고 실행 중인 카메라 → 새 설정 반영을 위해 재시작.
+	for _, dc := range diskConfigs {
+		if !running[dc.ID] {
+			continue
+		}
+		if m.CameraByID(dc.ID) == nil {
+			continue // 이미 제거됨
+		}
+		if err := m.restartCamera(dc.ID); err != nil {
+			fmt.Printf("[WARN] Reload: restart camera '%s' failed: %v\n", dc.Name, err)
+			continue
+		}
+		updated = append(updated, dc.Name)
+	}
+
 	return added, updated, removed, nil
 }
 
 // StartAll 모든 카메라를 시작한다 (이미 실행 중인 것은 무시).
+// 디스크 config를 다시 읽어 최신 설정이 반영된 상태로 시작한다.
 func (m *Manager) StartAll() {
+	// 디스크에서 최신 설정을 다시 읽어, 정지된 카메라가 최신 설정으로 시작되게 한다.
+	if path := m.ConfigPath(); path != "" {
+		if diskConfigs, err := config.LoadAll(path); err == nil {
+			m.syncConfigsFromDisk(diskConfigs)
+		}
+	}
 	for _, cfg := range m.configs {
 		if m.CameraByID(cfg.ID) != nil {
 			continue
+		}
+		if cfg.OnvifPort == 0 {
+			ps := m.FindAvailablePorts()
+			ps.applyToConfig(cfg)
 		}
 		cam, err := m.startCamera(cfg)
 		if err != nil {
@@ -567,6 +666,17 @@ func (m *Manager) captureLoop(cam *camera.Camera) {
 		case <-m.stopCh:
 			return
 		default:
+		}
+
+		// bypass 모드에서 로컬 소비자(MJPEG 클라이언트/레코더)가 없으면
+		// 전체 속도로 디코딩/처리할 필요가 없다. go2rtc가 소스를 직접 읽어
+		// 전송하므로 스냅샷 유지용 저주기(1fps)로만 캡처해 CPU를 절약한다.
+		if cam.IdleBypass() {
+			select {
+			case <-m.stopCh:
+				return
+			case <-time.After(time.Second):
+			}
 		}
 
 		// 파일 소스: 새 파일이 업로드되면 (GetCurrentVideoPath가 원본과 달라지면)
