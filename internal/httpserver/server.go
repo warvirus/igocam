@@ -164,7 +164,7 @@ func (s *Server) renderWebUI() string {
 		ip = config.GetLocalIP()
 	}
 	previewURL := fmt.Sprintf("http://%s:%d/stream.html?src=%s", ip, s.config.Go2rtcAPIPort, s.config.MainStreamName)
-	mjpegURL := fmt.Sprintf("http://%s:%d/%s", ip, s.config.WebPort, s.config.MjpegURL)
+	mjpegURL := fmt.Sprintf("http://%s:%d/%s", ip, s.config.OnvifPort, s.config.MjpegURL)
 
 	repl := map[string]string{
 		"{{camera_name}}":       s.config.Name,
@@ -257,7 +257,7 @@ func (s *Server) serveConfig(w http.ResponseWriter) {
 		"main_stream_rtsp":  s.config.MainStreamRTSP(),
 		"sub_stream_rtsp":   s.config.SubStreamRTSP(),
 		"webrtc_url":        s.config.WebRTCURL(),
-		"mjpeg_url":         fmt.Sprintf("http://%s:%d/%s", ip, s.config.WebPort, s.config.MjpegURL),
+		"mjpeg_url":         fmt.Sprintf("http://%s:%d/%s", ip, s.config.OnvifPort, s.config.MjpegURL),
 		"streaming_mode":    "go2rtc",
 		"video_upload_mode": s.camera.VideoUploadModeValue(),
 		"current_video":     filepath.Base(s.camera.GetCurrentVideoPath()),

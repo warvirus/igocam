@@ -75,12 +75,16 @@ func (s *Server) Stop() error {
 
 // authMiddleware 선택적 Basic Auth 미들웨어.
 // '/'와 '/api/auth/login'은 인증 없이 접근 가능 (로그인 화면 제공),
+// '/api/cameras/{id}/snapshot'은 인증 없이 접근 가능 (<img src> 요청은
+// Authorization 헤더를 실을 수 없어 401이 되면 카드 썸네일이 표시되지 않음).
 // 그 외 '/api/*'에만 인증 적용.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		isAPI := strings.HasPrefix(r.URL.Path, "/api/")
 		isAuthEndpoint := r.URL.Path == "/api/auth/login"
-		if s.adminUser != "" && isAPI && !isAuthEndpoint {
+		isSnapshot := strings.HasPrefix(r.URL.Path, "/api/cameras/") &&
+			strings.HasSuffix(r.URL.Path, "/snapshot")
+		if s.adminUser != "" && isAPI && !isAuthEndpoint && !isSnapshot {
 			auth := r.Header.Get("Authorization")
 			if !strings.HasPrefix(auth, "Basic ") {
 				jsonResp(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})

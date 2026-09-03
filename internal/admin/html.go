@@ -131,7 +131,7 @@ const adminHTML = `<!DOCTYPE html>
     </div>
     <div class="p-5 grid grid-cols-2 gap-4">
       <div><label class="block text-sm text-slate-400 mb-1">이름</label><input id="f_name" class="w-full bg-slate-700 rounded px-3 py-2 text-sm"></div>
-      <div><label class="block text-sm text-slate-400 mb-1">소스 (파일경로/URL)</label><input id="f_source" class="w-full bg-slate-700 rounded px-3 py-2 text-sm"></div>
+      <div><label class="block text-sm text-slate-400 mb-1">소스 (파일경로/URL)</label><input id="f_source" value="./videos/default.mp4" class="w-full bg-slate-700 rounded px-3 py-2 text-sm"></div>
       <div><label class="block text-sm text-slate-400 mb-1">HW 가속</label>
         <select id="f_hw_accel" class="w-full bg-slate-700 rounded px-3 py-2 text-sm">
           <option value="videotoolbox">videotoolbox</option>
@@ -142,7 +142,7 @@ const adminHTML = `<!DOCTYPE html>
         </select></div>
       <div><label class="block text-sm text-slate-400 mb-1">Bypass</label>
         <select id="f_bypass" class="w-full bg-slate-700 rounded px-3 py-2 text-sm">
-          <option value="false">false</option><option value="true">true</option>
+          <option value="false">false</option><option value="true" selected>true</option>
         </select></div>
       <div><label class="block text-sm text-slate-400 mb-1">ONVIF 포트</label><input id="f_onvif" type="number" class="w-full bg-slate-700 rounded px-3 py-2 text-sm"></div>
       <div><label class="block text-sm text-slate-400 mb-1">RTSP 포트</label><input id="f_rtsp" type="number" class="w-full bg-slate-700 rounded px-3 py-2 text-sm"></div>
@@ -308,9 +308,10 @@ async function resumeStreams(){ try{ await api('/api/resume-streams','POST'); to
 function openAddModal(){
   editingId=null;
   document.getElementById('modalTitle').textContent='카메라 추가';
-  ['f_name','f_source','f_main_w','f_main_h','f_main_fps','f_main_br','f_sub_w','f_sub_h','f_sub_fps','f_sub_br'].forEach(function(id){ document.getElementById(id).value=''; });
+  ['f_name','f_main_w','f_main_h','f_main_fps','f_main_br','f_sub_w','f_sub_h','f_sub_fps','f_sub_br'].forEach(function(id){ document.getElementById(id).value=''; });
+  document.getElementById('f_source').value='./videos/default.mp4';
   document.getElementById('f_hw_accel').value='videotoolbox';
-  document.getElementById('f_bypass').value='false';
+  document.getElementById('f_bypass').value='true';
   // 해상도 기본값
   document.getElementById('f_main_w').value=1280; document.getElementById('f_main_h').value=720;
   document.getElementById('f_sub_w').value=320; document.getElementById('f_sub_h').value=180;
