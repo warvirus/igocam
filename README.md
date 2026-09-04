@@ -2,10 +2,22 @@
 
 **i**nstant **Go** **Cam** — 가상 IP 카메라 서버.
 
-ONVIF / RTSP / Web UI / PTZ / MJPEG를 지원하는 다중 카메라 스트리밍 서버입니다.
+ONVIF / RTSP / RTMP / WebRTC / Web UI / MJPEG / PTZ / 녹화를 지원하는 다중 카메라 스트리밍 서버입니다.
+동영상 파일 / 웹캠 / RTSP 소스를 실제 IP 카메라처럼 서비스합니다.
 Python 프로젝트 [IPyCam](https://github.com/)을 Go로 포팅했습니다.
 
-> ⚠️ 이 프로젝트는 **Go 언어를 몰라도 사용할 수 있습니다.** 아래 설명을 따라하세요.
+> ⚠️ 이 프로젝트는 **Go 언어를 몰라도 사용할 수 있습니다.** 아래 설명을 순서대로 따라하세요.
+
+---
+
+## 📖 프로젝트 설명서 (아키텍처)
+
+시스템 구조, 데이터 파이프라인, 포트 구성, 기능 상세는 설명서를 참고하세요.
+
+| 문서 | 설명 |
+|------|------|
+| [doc/architecture.html](doc/architecture.html) | 아키텍처 다이어그램 (그림 한 장으로 보는 전체 구조) |
+| [doc/architecture.md](doc/architecture.md) | 아키텍처 상세 문서 (패키지별 구성, 설정 필드, 운영 제약) |
 
 ---
 
@@ -74,16 +86,24 @@ go install github.com/AlexxIT/go2rtc@v1.9.14
 
 또는 [릴리스 페이지](https://github.com/AlexxIT/go2rtc/releases)에서 `go2rtc_*` 바이너리를 받아 `bin/` 폴더에 넣으세요.
 
+> Docker로 실행하면 go2rtc/ffmpeg가 이미지에 포함되어 별도 설치가 필요 없습니다.
+
 ### 2. 실행
 
 ```bash
-./bin/igocam --config bin/camera_config.json 
-
-또는
-
-./bin/igocam --config bin/camera_config.json --port 8080 --admin-user admin --admin-pass pass
-# 접속: http://192.168.0.217:8080/
+./bin/igocam --config bin/camera_config.json
 ```
+
+**옵션:**
+
+| 플래그 | 기본값 | 설명 |
+|--------|--------|------|
+| `--config` | `bin/camera_config.json` | 카메라 설정 JSON 경로 |
+| `--port` | `8080` | 관리자 페이지 포트 |
+| `--admin-user` / `--admin-pass` | 없음 | 관리자 페이지 로그인 (미지정 시 인증 비활성) |
+| `--log-level` | `INFO` | DEBUG/INFO/WARNING/ERROR |
+
+`.env` 파일로도 설정 가능합니다 (`IGOCAM_CONFIG`, `IGOCAM_PORT`, `IGOCAM_ADMIN_USER`, `IGOCAM_ADMIN_PASS`, `IGOCAM_LOG_LEVEL`). 환경변수가 CLI 플래그보다 우선합니다.
 
 ### 3. 접속하기
 
@@ -93,9 +113,11 @@ go install github.com/AlexxIT/go2rtc@v1.9.14
 Camera: Virtual Camera 1
   Web UI:    http://192.168.1.10:8090/
   ONVIF:     http://192.168.1.10:8090/onvif/device_service
-  RTSP:      rtsp://192.168.1.10:8554/video_main
+  RTSP:      rtsp://192.168.1.10:8553/video_main
   MJPEG:     http://192.168.1.10:8090/stream.mjpeg
 ```
+
+**관리자 페이지:** `http://<서버IP>:8080/` — 카메라 추가/수정/삭제, 전체 시작/정지, 일시정지, 스냅샷 썸네일, 상태 확인
 
 ---
 
@@ -103,16 +125,16 @@ Camera: Virtual Camera 1
 
 `bin/camera_config.json`에서 카메라를 설정합니다.
 
-**기본 구조 (4대 카메라):**
+**기본 구조:**
 
 ```json
 [
   {
     "name": "Virtual Camera 1",
-    "source": "/Users/사용자/videos/sample.mp4",
+    "source": "/path/to/sample.mp4",
     "onvif_port": 8090,
-    "rtsp_port": 8554,
-    "rtmp_port": 1935,
+    "rtsp_port": 8553,
+    "rtmp_port": 1934,
     "web_port": 8081,
     "go2rtc_api_port": 1984,
     "webrtc_port": 8555,
@@ -120,7 +142,8 @@ Camera: Virtual Camera 1
     "main_height": 360,
     "main_fps": 30,
     "main_bitrate": "1M",
-    "hw_accel": "cpu"
+    "hw_accel": "videotoolbox",
+    "bypass": false
   }
 ]
 ```
@@ -129,15 +152,19 @@ Camera: Virtual Camera 1
 
 | 필드 | 설명 |
 |------|------|
-| `name` | 카메라 이름 (Web UI에 표시) |
+| `name` | 카메라 이름 (Web UI/관리자 페이지에 표시) |
 | `source` | 비디오 파일 경로, RTSP 주소, 또는 카메라 번호("0") |
-| `onvif_port` | ONVIF / Web UI 접속 포트 |
-| `rtsp_port` | RTSP 스트리밍 포트 |
-| `main_width` | 출력 영상 가로 해상도 |
-| `main_fps` | 초당 프레임 수 (30fps 권장) |
-| `hw_accel` | 인코딩 방식: `cpu`(소프트웨어), `nvenc`(NVIDIA), `qsv`(Intel) |
+| `onvif_port` | ONVIF / 카메라 Web UI / MJPEG / 스냅샷 접속 포트 |
+| `rtsp_port` | RTSP 스트리밍 포트 (main: `/video_main`, sub: `/video_sub`) |
+| `main_width` / `main_height` | 출력 영상 해상도 |
+| `main_fps` | 초당 프레임 수 (30fps 권장, 소스 FPS로 자동 보정됨) |
+| `hw_accel` | 인코딩 방식: `cpu`(소프트웨어), `nvenc`(NVIDIA), `qsv`(Intel), `videotoolbox`(macOS) |
+| `bypass` | `true`면 H264 소스를 트랜스코딩 없이 go2rtc로 직통 전송 (CPU 절감) |
 
 **카메라 여러 대 추가:** 배열 안에 객체를 추가하면 됩니다. 포트가 겹치지 않게 주의하세요.
+관리자 페이지에서 추가하면 포트를 자동 제안합니다.
+
+전체 필드 목록은 [doc/architecture.md](doc/architecture.md#6-설정-cameraconfig)를 참고하세요.
 
 ---
 
@@ -151,6 +178,11 @@ Camera: Virtual Camera 1
 
 ### RTSP 카메라
 `source`에 `"rtsp://카메라주소:554/stream"` 을 입력합니다.
+
+### 파일 업로드
+카메라 Web UI에서 비디오 파일을 업로드하면 즉시 재생이 전환됩니다.
+
+> H264 소스를 권장합니다. VP9/AV1 4K는 OpenCV 소프트웨어 디코딩 한계로 실시간 재생이 어렵습니다. (bypass 모드에서는 AV1이 자동 재인코딩됩니다)
 
 ---
 
@@ -190,8 +222,13 @@ igocam/
 │   ├── onvif/            # ONVIF SOAP 서비스
 │   ├── ptz/              # PTZ 컨트롤러
 │   ├── discovery/        # WS-Discovery
-│   ├── httpserver/       # Web UI + REST API
+│   ├── httpserver/       # 카메라 Web UI + REST API
+│   ├── admin/            # 관리자 서버 (8080)
+│   ├── manager/          # 다중 카메라 오케스트레이터
 │   └── streamer/         # FFmpeg 인코딩
+├── doc/                  # 문서
+│   ├── architecture.html # 아키텍처 다이어그램
+│   └── architecture.md   # 아키텍처 상세
 ├── examples/             # 사용 예제
 │   ├── basic/            # 웹캠 기본 사용
 │   ├── video_file/       # 비디오 파일 재생
@@ -229,6 +266,12 @@ go run ./examples/ptz_demo/
 
 **"bind: address already in use"**
 → 해당 포트가 이미 사용 중입니다. `camera_config.json`에서 포트 번호를 변경하세요.
+
+**관리자 페이지 썸네일이 안 나와요**
+→ 최신 빌드인지 확인하세요. 실행 중인 프로세스가 구버전 바이너리일 수 있습니다. (`ps aux | grep igocam` 시작 시각 vs `bin/igocam` 빌드 시각 비교)
+
+**igocam을 죽였는데 포트가 여전히 사용 중이에요**
+→ go2rtc가 고아 프로세스로 남은 것입니다. `ps aux | grep go2rtc`로 확인 후 종료하세요.
 
 ---
 
