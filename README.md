@@ -93,6 +93,7 @@ go install github.com/AlexxIT/go2rtc@v1.9.14
 ```bash
 ./bin/igocam --config bin/camera_config.json
 ```
+![실행화면](./doc/scenes1.gif)
 
 **옵션:**
 
