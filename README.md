@@ -19,6 +19,8 @@ Python 프로젝트 [IPyCam](https://github.com/)을 Go로 포팅했습니다.
 | [doc/architecture.html](doc/architecture.html) | 아키텍처 다이어그램 (그림 한 장으로 보는 전체 구조) |
 | [doc/architecture.md](doc/architecture.md) | 아키텍처 상세 문서 (패키지별 구성, 설정 필드, 운영 제약) |
 
+![구현방법](./doc/architecture_1920x1024.jpg)
+
 ---
 
 ## 📦 다운로드
