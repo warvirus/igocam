@@ -52,6 +52,7 @@ mem_probe_main.go
 # ── AI 지침서 (instruction files) ──
 AGENTS.md
 CLAUDE.md
+.kilo
 .agents/
 .claude/
 .cursor/
